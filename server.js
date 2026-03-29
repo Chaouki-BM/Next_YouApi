@@ -31,10 +31,12 @@ connectDB();
 const userRoutes = require("./src/routes/User.routes");
 const mirrorRoutes = require("./src/routes/MirrorSession.routes");
 const exerciseRoutes = require("./src/routes/Exercise.routes");
+const bodyAnalysisRoutes = require("./src/routes/BodyAnalysis.routes");
 
 app.use("/api/users", userRoutes);
 app.use("/api/mirror", mirrorRoutes);
 app.use("/api/exercises", exerciseRoutes);
+app.use("/api/body-analysis", bodyAnalysisRoutes);
 
 // Socket.IO connection handling
 io.on("connection", (socket) => {

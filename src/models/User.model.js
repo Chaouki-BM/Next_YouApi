@@ -14,6 +14,11 @@ const userSchema = new mongoose.Schema(
       ref: "profile",
       required: false,
     },
+    BodyAnalysis: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BodyAnalysis",
+      required: false,
+    },
   },
   { timestamps: true },
 );

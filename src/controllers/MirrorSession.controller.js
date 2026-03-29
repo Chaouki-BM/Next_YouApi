@@ -269,8 +269,23 @@ exports.stopExercise = asyncHandler(async (req, res) => {
     status: final_stats.status,
     stopped_at: final_stats.stopped_at,
   };
+  const MirrorSession = require("../models/MirrorSession.model");
 
   await saveExerciseResult(sessionId, result);
+
+  const { updateSessionTotals } = require("../services/BodyAnalysis.service");
+
+  const mirrorSession = await MirrorSession.findOne({ sessionId });
+  const userId = mirrorSession?.user;
+
+  if (userId) {
+    const lastExercise =
+      mirrorSession.exercises[mirrorSession.exercises.length - 1];
+    await updateSessionTotals(userId, {
+      calories: lastExercise?.calories_burned ?? result.calories ?? 0,
+      duration_sec: lastExercise?.duration_sec ?? result.duration_sec ?? 0,
+    });
+  }
 
   // 2. push summary to phone and mirror via socket
   const io = req.app.get("io");
