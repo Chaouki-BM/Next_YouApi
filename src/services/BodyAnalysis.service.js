@@ -37,7 +37,6 @@ async function submitWeeklyCheckIn(userId, { weight }) {
   const user = await User.findById(userId).populate("profile");
   console.log("user", user);
   const profile = user.profile;
-  console.log("profile", profile);
 
   const { bmi, muscle_mass, bmi_category } = calculateMetrics({
     weightKg: weight,
@@ -78,7 +77,7 @@ async function submitWeeklyCheckIn(userId, { weight }) {
         bmi_category,
         current_muscle_mass: muscle_mass,
         goal_weight: profile.target_weight ?? null,
-        is_weight_lost: weight < previousWeight,
+        // is_weight_lost: weight < previousWeight,
       },
     },
     { upsert: true, returnDocument: "after" },

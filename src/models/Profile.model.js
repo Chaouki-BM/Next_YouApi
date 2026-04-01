@@ -14,7 +14,7 @@ const profileSchema = new mongoose.Schema(
     sex: { type: String, enum: ["male", "female"], required: true },
     activity_level_lifestyle: {
       type: String,
-      enum: ["beginner", "intermediat", "advanced", "athlete"],
+      enum: ["beginner", "intermediate", "advanced", "athlete"],
       required: true,
     },
     medical_condition: {

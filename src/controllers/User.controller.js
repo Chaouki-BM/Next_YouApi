@@ -61,6 +61,20 @@ const updatePersonalInfo = asyncHandler(async (req, res, next) => {
   });
 });
 
+const User = require("../models/User.model");
+const Profile = require("../models/Profile.model");
+
+// Get user and profile data by token (login-like response)
+const getUserProfile = asyncHandler(async (req, res, next) => {
+  const userId = req.userId;
+  const result = await userService.getUserProfileById(userId);
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
 module.exports = {
   register,
   login,
@@ -68,4 +82,5 @@ module.exports = {
   requestPasswordReset,
   resetPassword,
   updatePersonalInfo,
+  getUserProfile,
 };
