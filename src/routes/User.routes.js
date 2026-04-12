@@ -7,6 +7,9 @@ const {
   resetPassword,
   updatePersonalInfo,
   getUserProfile,
+  changePassword,
+  deleteAccount,
+  downloadFitnessReport,
 } = require("../controllers/User.controller");
 const verifyToken = require("../middlewares/auth.middleware");
 
@@ -25,4 +28,7 @@ router.post("/reset-password", resetPassword);
 
 router.put("/update-personal-info", verifyToken, updatePersonalInfo);
 router.get("/me", verifyToken, getUserProfile);
+router.put("/change-password", verifyToken, changePassword);
+router.delete("/delete-account", verifyToken, deleteAccount);
+router.get("/fitness-report", verifyToken, downloadFitnessReport);
 module.exports = router;

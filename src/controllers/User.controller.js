@@ -75,6 +75,48 @@ const getUserProfile = asyncHandler(async (req, res, next) => {
   });
 });
 
+// Handles authenticated password change requests.
+const changePassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword, confirmPassword } = req.body;
+
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    const err = new Error("All fields are required");
+    err.status = 400;
+    throw err;
+  }
+
+  const result = await userService.changePassword(req.userId, {
+    currentPassword,
+    newPassword,
+    confirmPassword,
+  });
+  return res.status(200).json(result);
+});
+
+// Handles authenticated account deletion requests.
+const deleteAccount = asyncHandler(async (req, res) => {
+  const { password } = req.body;
+
+  if (!password) {
+    const err = new Error("Password is required to delete account");
+    err.status = 400;
+    throw err;
+  }
+
+  const result = await userService.deleteAccount(req.userId, { password });
+  return res.status(200).json(result);
+});
+
+const downloadFitnessReport = asyncHandler(async (req, res) => {
+  const { buffer, fileName } = await userService.getFitnessReportPdf(
+    req.userId,
+  );
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename=\"${fileName}\"`);
+  return res.status(200).send(buffer);
+});
+
 module.exports = {
   register,
   login,
@@ -83,4 +125,7 @@ module.exports = {
   resetPassword,
   updatePersonalInfo,
   getUserProfile,
+  changePassword,
+  deleteAccount,
+  downloadFitnessReport,
 };

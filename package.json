@@ -10,6 +10,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "axios": "^1.13.5",
     "bcrypt": "^6.0.0",
     "compression": "^1.8.1",
@@ -18,10 +19,13 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
     "generate-password": "^1.7.1",
+    "groq-sdk": "^1.1.2",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
+    "mongodb": "^7.1.1",
     "mongoose": "^9.2.1",
     "nodemailer": "^8.0.1",
+    "pdfkit": "^0.18.0",
     "redis": "^5.11.0",
     "socket.io": "^4.8.3"
   },

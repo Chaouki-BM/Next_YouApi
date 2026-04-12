@@ -32,11 +32,15 @@ const userRoutes = require("./src/routes/User.routes");
 const mirrorRoutes = require("./src/routes/MirrorSession.routes");
 const exerciseRoutes = require("./src/routes/Exercise.routes");
 const bodyAnalysisRoutes = require("./src/routes/BodyAnalysis.routes");
+const nutritionPlanRoutes = require("./src/routes/nutritionPlan.routes");
+const trainingPlanRoutes = require("./src/routes/TrainingPlan.routes");
 
 app.use("/api/users", userRoutes);
 app.use("/api/mirror", mirrorRoutes);
 app.use("/api/exercises", exerciseRoutes);
 app.use("/api/body-analysis", bodyAnalysisRoutes);
+app.use("/api/nutrition-plan", nutritionPlanRoutes);
+app.use("/api/training-plan", trainingPlanRoutes);
 
 // Socket.IO connection handling
 io.on("connection", (socket) => {

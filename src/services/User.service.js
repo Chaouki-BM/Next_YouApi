@@ -6,6 +6,8 @@ const Profile = require("../models/Profile.model");
 const BodyAnalysis = require("../models/BodyAnalysis.model");
 const { calculateMetrics, getWeekNumber } = require("../utils/bodyMetrics");
 const WeeklyCheckIn = require("../models/WeeklyCheckIn.model");
+const MirrorSession = require("../models/MirrorSession.model");
+const generateFitnessPdf = require("../utils/generateFitnessPdf");
 // Nodemailer configuration
 const transporter = nodemailer.createTransport({
   service: process.env.EMAIL_SERVICE || "gmail",
@@ -852,6 +854,176 @@ class UserService {
       userId: user._id,
       user: userData,
       message: "User profile fetched successfully",
+    };
+  }
+
+  // Validates current password and updates it with a new hashed password.
+  async changePassword(
+    userId,
+    { currentPassword, newPassword, confirmPassword },
+  ) {
+    const user = await User.findById(userId).select("+password");
+
+    if (!user) {
+      const err = new Error("User not found");
+      err.status = 404;
+      throw err;
+    }
+
+    const isPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password,
+    );
+
+    if (!isPasswordValid) {
+      const err = new Error("Current password is incorrect");
+      err.status = 401;
+      throw err;
+    }
+
+    if (newPassword !== confirmPassword) {
+      const err = new Error("Passwords do not match");
+      err.status = 400;
+      throw err;
+    }
+
+    if (newPassword.length < 6) {
+      const err = new Error("Password must be at least 6 characters");
+      err.status = 400;
+      throw err;
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 12);
+    console.log(hashed);
+    user.password = hashed;
+    await user.save();
+
+    return {
+      success: true,
+      message: "Password updated successfully",
+    };
+  }
+
+  // Verifies password then permanently deletes the user account and related data.
+  async deleteAccount(userId, { password }) {
+    const user = await User.findById(userId).select("+password");
+    if (!user) {
+      const err = new Error("User not found");
+      err.status = 404;
+      throw err;
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      const err = new Error("Incorrect password");
+      err.status = 401;
+      throw err;
+    }
+
+    await WeeklyCheckIn.deleteMany({ userId });
+    await BodyAnalysis.deleteOne({ userId });
+    await MirrorSession.deleteMany({ user: userId });
+    await Profile.deleteOne({ userId });
+    await User.findByIdAndDelete(userId);
+
+    return {
+      success: true,
+      message: "Account deleted successfully",
+    };
+  }
+
+  async getFitnessReportPdf(userId) {
+    const user = await User.findById(userId).populate("profile");
+    if (!user) {
+      const err = new Error("User not found");
+      err.status = 404;
+      throw err;
+    }
+
+    const bodyAnalysis = await BodyAnalysis.findOne({ userId });
+    const weeklyCheckIns = await WeeklyCheckIn.find({ userId })
+      .sort({ year: -1, week_number: -1 })
+      .limit(8);
+    const mirrorSessions = await MirrorSession.find({ user: userId })
+      .sort({ updatedAt: -1 })
+      .limit(20);
+
+    const summary = {
+      current_weight: bodyAnalysis?.current_weight ?? user.profile?.weight ?? 0,
+      current_bmi: bodyAnalysis?.current_bmi ?? 0,
+      total_calories_burned: bodyAnalysis?.total_calories_burned ?? 0,
+      workout_streak: bodyAnalysis?.workout_streak ?? 0,
+    };
+
+    const weeklyData = weeklyCheckIns
+      .map((entry) => ({
+        week_number: entry.week_number,
+        month: entry.month,
+        weight: entry.weight,
+        muscle_mass: entry.muscle_mass,
+        calories_burned: entry.calories_burned,
+        sessions_count: entry.sessions_count,
+      }))
+      .reverse();
+
+    const sessions = mirrorSessions
+      .flatMap((session) => {
+        if (session.exercises?.length) {
+          return session.exercises.map((exercise) => ({
+            name: exercise.name,
+            reps_done: exercise.reps_done,
+            sets_done: exercise.sets_done,
+            calories_burned: exercise.calories_burned,
+            completedAt: exercise.completedAt || session.updatedAt,
+          }));
+        }
+
+        return [
+          {
+            name: "Mirror Session",
+            reps_done: 0,
+            sets_done: 0,
+            calories_burned: session.total_calories || 0,
+            completedAt: session.updatedAt,
+          },
+        ];
+      })
+      .slice(0, 20);
+
+    const reportData = {
+      user: {
+        fullname: user.fullname,
+        email: user.email,
+      },
+      profile: {
+        height: user.profile?.height,
+        age_years: user.profile?.age_years,
+        target_weight: user.profile?.target_weight ?? bodyAnalysis?.goal_weight,
+      },
+      summary,
+      weeklyData,
+      sessions,
+    };
+
+    const buffer = await generateFitnessPdf(reportData);
+
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: user.email,
+      subject: "Your NextYou Fitness Report",
+      text: `Hello ${user.fullname}, your NextYou fitness report is attached to this email.`,
+      attachments: [
+        {
+          filename: `nextyou-fitness-report.pdf`,
+          content: buffer,
+          contentType: "application/pdf",
+        },
+      ],
+    });
+
+    return {
+      buffer,
+      fileName: `nextyou-fitness-report.pdf`,
     };
   }
 }
