@@ -7,9 +7,6 @@ services:
       - "5000:5000"
     env_file:
       - .env
-    environment:
-      - MONGO_URI=mongodb://mongo:27017/nextyou
-      - REDIS_URL=redis://redis:6379
     depends_on:
       mongo:
         condition: service_healthy
