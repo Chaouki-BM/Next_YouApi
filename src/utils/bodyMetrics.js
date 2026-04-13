@@ -1,6 +1,69 @@
-function calculateMetrics({ weightKg, heightCm, age, gender }) {
-  const heightM = heightCm / 100;
-  const bmi = parseFloat((weightKg / (heightM * heightM)).toFixed(1));
+const ACTIVITY_MULTIPLIER_BY_LEVEL = {
+  beginner: 1.375,
+  intermediate: 1.55,
+  advanced: 1.725,
+};
+
+function normalizeLower(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function calculateBmi(weightKg, heightCm) {
+  const heightM = Number(heightCm) / 100;
+  if (!Number.isFinite(heightM) || heightM <= 0) return 0;
+  return parseFloat((Number(weightKg) / (heightM * heightM)).toFixed(1));
+}
+
+function getBmiCategory(bmi) {
+  if (bmi < 18.5) return "underweight";
+  if (bmi < 25) return "normal";
+  if (bmi < 30) return "overweight";
+  return "obese";
+}
+
+function calculateBmr({ weightKg, heightCm, age, gender }) {
+  const g = normalizeLower(gender);
+  const base =
+    10 * Number(weightKg) + 6.25 * Number(heightCm) - 5 * Number(age);
+  if (g === "female") return base - 161;
+  return base + 5;
+}
+
+function calculateCalorieTarget({
+  weightKg,
+  heightCm,
+  age,
+  gender,
+  level,
+  targetWeight,
+}) {
+  const bmr = calculateBmr({ weightKg, heightCm, age, gender });
+  const activity =
+    ACTIVITY_MULTIPLIER_BY_LEVEL[normalizeLower(level)] ||
+    ACTIVITY_MULTIPLIER_BY_LEVEL.beginner;
+  const tdee = bmr * activity;
+
+  let adjusted = tdee;
+  if (Number(targetWeight) > Number(weightKg)) {
+    adjusted += 250;
+  } else if (Number(targetWeight) < Number(weightKg)) {
+    adjusted -= 400;
+  }
+
+  return Math.max(1200, Math.round(adjusted));
+}
+
+function calculateMetrics({
+  weightKg,
+  heightCm,
+  age,
+  gender,
+  targetWeight,
+  level,
+}) {
+  const bmi = calculateBmi(weightKg, heightCm);
 
   let lbm = 0;
   if (gender === "male") {
@@ -11,16 +74,17 @@ function calculateMetrics({ weightKg, heightCm, age, gender }) {
 
   const muscle_mass = parseFloat((lbm * 0.9).toFixed(1));
 
-  let bmi_category = "obese";
-  if (bmi < 18.5) {
-    bmi_category = "underweight";
-  } else if (bmi < 25) {
-    bmi_category = "normal";
-  } else if (bmi < 30) {
-    bmi_category = "overweight";
-  }
+  const bmi_category = getBmiCategory(bmi);
+  const calorieTarget = calculateCalorieTarget({
+    weightKg,
+    heightCm,
+    age,
+    gender,
+    level,
+    targetWeight,
+  });
 
-  return { bmi, muscle_mass, bmi_category };
+  return { bmi, muscle_mass, bmi_category, calorieTarget };
 }
 
 function getWeekNumber(date) {
@@ -34,4 +98,9 @@ function getWeekNumber(date) {
   );
 }
 
-module.exports = { calculateMetrics, getWeekNumber };
+module.exports = {
+  calculateMetrics,
+  calculateBmi,
+  calculateCalorieTarget,
+  getWeekNumber,
+};

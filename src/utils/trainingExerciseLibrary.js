@@ -1,4 +1,4 @@
-module.exports = [
+const rawExercises = [
   // PUSH (18)
   {
     _id: "67f6a1000000000000000001",
@@ -911,3 +911,65 @@ module.exports = [
     workoutData: { calories: 13, bpm: 86 },
   },
 ];
+
+function inferMuscleGroup(exercise) {
+  const name = String(exercise?.name || "").toLowerCase();
+  const category = String(exercise?.category || "").toLowerCase();
+
+  if (category === "push") {
+    if (/(tricep|diamond|dip)/i.test(name)) return "triceps";
+    if (/(bench|chest|incline barbell press|fly)/i.test(name)) return "chest";
+    if (/(shoulder|lateral raise|front raise|overhead|press)/i.test(name)) {
+      return "shoulders";
+    }
+    return "chest";
+  }
+
+  if (category === "pull") {
+    if (/(curl|bicep|hammer)/i.test(name)) return "biceps";
+    if (/(deadlift|romanian)/i.test(name)) return "hamstrings";
+    return "back";
+  }
+
+  if (category === "legs") {
+    if (/(curl|romanian deadlift)/i.test(name)) return "hamstrings";
+    if (/(glute|hip thrust)/i.test(name)) return "glutes";
+    if (/(extension|squat|lunge|press|step)/i.test(name)) return "quads";
+    return "legs";
+  }
+
+  if (category === "core") {
+    if (/(side|twist|bend)/i.test(name)) return "obliques";
+    return "core";
+  }
+
+  if (category === "mobility") {
+    return "mobility";
+  }
+
+  return "full_body";
+}
+
+function inferExerciseType(exercise) {
+  const name = String(exercise?.name || "").toLowerCase();
+  const category = String(exercise?.category || "").toLowerCase();
+
+  if (category === "mobility") return "isolation";
+  if (category === "cardio") return "compound";
+
+  if (
+    /(push-?up|dip|squat|deadlift|row|pull-?up|chin-?up|press|lunge|step-?up|thrust|swing)/i.test(
+      name,
+    )
+  ) {
+    return "compound";
+  }
+
+  return "isolation";
+}
+
+module.exports = rawExercises.map((exercise) => ({
+  ...exercise,
+  muscleGroup: inferMuscleGroup(exercise),
+  type: inferExerciseType(exercise),
+}));

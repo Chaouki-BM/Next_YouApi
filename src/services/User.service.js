@@ -7,6 +7,11 @@ const BodyAnalysis = require("../models/BodyAnalysis.model");
 const { calculateMetrics, getWeekNumber } = require("../utils/bodyMetrics");
 const WeeklyCheckIn = require("../models/WeeklyCheckIn.model");
 const MirrorSession = require("../models/MirrorSession.model");
+const TrainingPlan = require("../models/TrainingPlan.model");
+const WorkoutDay = require("../models/WorkoutDay.model");
+const DayExercise = require("../models/DayExercise.model");
+const NutritionPlan = require("../models/NutritionPlan.model");
+const Meal = require("../models/Meal.model");
 const generateFitnessPdf = require("../utils/generateFitnessPdf");
 // Nodemailer configuration
 const transporter = nodemailer.createTransport({
@@ -920,10 +925,25 @@ class UserService {
       throw err;
     }
 
-    await WeeklyCheckIn.deleteMany({ userId });
-    await BodyAnalysis.deleteOne({ userId });
-    await MirrorSession.deleteMany({ user: userId });
-    await Profile.deleteOne({ userId });
+    const [trainingPlans, nutritionPlans] = await Promise.all([
+      TrainingPlan.find({ userId }).select("_id"),
+      NutritionPlan.find({ user: userId }).select("_id"),
+    ]);
+
+    const trainingPlanIds = trainingPlans.map((plan) => plan._id);
+    const nutritionPlanIds = nutritionPlans.map((plan) => plan._id);
+
+    await Promise.all([
+      Meal.deleteMany({ nutritionPlan: { $in: nutritionPlanIds } }),
+      NutritionPlan.deleteMany({ user: userId }),
+      DayExercise.deleteMany({ planId: { $in: trainingPlanIds } }),
+      WorkoutDay.deleteMany({ planId: { $in: trainingPlanIds } }),
+      TrainingPlan.deleteMany({ userId }),
+      WeeklyCheckIn.deleteMany({ userId }),
+      BodyAnalysis.deleteMany({ userId }),
+      MirrorSession.deleteMany({ user: userId }),
+      Profile.deleteOne({ userId }),
+    ]);
     await User.findByIdAndDelete(userId);
 
     return {

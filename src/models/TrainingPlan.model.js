@@ -27,7 +27,38 @@ const trainingPlanSchema = new mongoose.Schema(
       required: true,
     },
 
+    daysPerWeek: {
+      type: Number,
+      required: true,
+      min: 1,
+      max: 7,
+      default: 3,
+    },
+
+    splitType: {
+      type: String,
+      enum: ["full_body", "upper_lower", "push_pull_legs"],
+      required: true,
+      default: "full_body",
+    },
+
     targetWeight: {
+      type: Number,
+      default: 0,
+    },
+
+    bmi: {
+      type: Number,
+      default: 0,
+    },
+
+    bmiCategory: {
+      type: String,
+      enum: ["underweight", "normal", "overweight", "obese", "unknown"],
+      default: "unknown",
+    },
+
+    calorieTarget: {
       type: Number,
       default: 0,
     },
@@ -36,11 +67,6 @@ const trainingPlanSchema = new mongoose.Schema(
       trainingStyle: String,
       daysPerWeek: Number,
       sessionDuration: Number,
-    },
-
-    goalTimeline: {
-      type: mongoose.Schema.Types.Mixed,
-      default: {},
     },
 
     startDate: {

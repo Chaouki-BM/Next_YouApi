@@ -1,5 +1,9 @@
-const trainingExerciseLibrary = require("../utils/trainingExerciseLibrary");
 const TrainingPlan = require("../models/TrainingPlan.model");
+const WorkoutDay = require("../models/WorkoutDay.model");
+const DayExercise = require("../models/DayExercise.model");
+const User = require("../models/User.model");
+const trainingExerciseLibrary = require("../utils/trainingExerciseLibrary");
+const { calculateMetrics } = require("../utils/bodyMetrics");
 
 const LEVEL_ORDER = {
   beginner: 1,
@@ -7,37 +11,30 @@ const LEVEL_ORDER = {
   advanced: 3,
 };
 
-const WEEKLY_FOCUS = {
-  3: ["push", "legs", "pull"],
-  4: ["push", "legs", "pull", "full_body"],
-  5: ["push", "legs", "pull", "core", "full_body"],
-  6: ["push", "pull", "legs", "push", "pull", "legs"],
+const GOAL_ENUM = [
+  "weight_loss",
+  "strength",
+  "endurance",
+  "flexibility",
+  "recovery",
+  "event",
+];
+
+const SPLIT_PATTERNS = {
+  push_pull_legs: ["push", "pull", "rest", "legs", "push", "rest"],
+  full_body: ["full_body", "rest", "full_body", "rest", "full_body", "rest"],
+  upper_lower: ["push", "legs", "rest", "pull", "legs", "rest"],
 };
 
-const REST_BY_LEVEL = {
-  beginner: "60-90s",
-  intermediate: "45-60s",
-  advanced: "30-45s",
+const MAIN_RULES = {
+  push: { compound: 1, isolation: 2 },
+  pull: { compound: 1, isolation: 2 },
 };
 
-const SETS_BY_LEVEL = {
-  beginner: 2,
-  intermediate: 3,
-  advanced: 4,
-};
-
-const REPS_BY_LEVEL = {
+const BASE_REPS = {
   beginner: "10-12",
-  intermediate: "10-15",
-  advanced: "8-12",
-};
-
-const GOAL_RATIOS = {
-  weight_loss: { strength: 0.5, cardio: 0.4, core: 0.1 },
-  strength: { strength: 0.7, cardio: 0.1, core: 0.2 },
-  endurance: { strength: 0.3, cardio: 0.6, core: 0.1 },
-  flexibility: { strength: 0, cardio: 0, core: 0 },
-  recovery: { strength: 0, cardio: 0, core: 0 },
+  intermediate: "8-12",
+  advanced: "6-10",
 };
 
 const DIFFICULTY_ORDER = {
@@ -46,1004 +43,966 @@ const DIFFICULTY_ORDER = {
   advanced: 3,
 };
 
-const WEEK_PHASES = [
-  {
-    week: 1,
-    label: "baseline",
-    title: "Baseline",
-    setsDelta: 0,
-    restWeek: 1,
-    calorieMultiplier: 1,
-    exerciseMode: "stable",
-    progressionNote: "Establish form, pacing, and recovery habits.",
-  },
-  {
-    week: 2,
-    label: "build",
-    title: "Build",
-    setsDelta: 1,
-    restWeek: 2,
-    calorieMultiplier: 1.05,
-    exerciseMode: "variation",
-    progressionNote: "Add a small volume bump and rotate in a new variation.",
-  },
-  {
-    week: 3,
-    label: "intensify",
-    title: "Intensify",
-    setsDelta: 1,
-    restWeek: 3,
-    calorieMultiplier: 1.1,
-    exerciseMode: "upgrade",
-    progressionNote: "Use slightly harder selections and tighter rest.",
-  },
-  {
-    week: 4,
-    label: "deload",
-    title: "Deload",
-    setsDelta: -1,
-    restWeek: 4,
-    calorieMultiplier: 0.9,
-    exerciseMode: "recover",
-    progressionNote:
-      "Reduce load so the body can recover before the next block.",
-  },
-];
-
-const GOAL_WEEKLY_RATES = {
-  weight_loss: { beginner: 0.5, intermediate: 0.65, advanced: 0.75 },
-  strength: { beginner: 0.35, intermediate: 0.45, advanced: 0.55 },
-  endurance: { beginner: 0.4, intermediate: 0.5, advanced: 0.6 },
-  flexibility: { beginner: 0.25, intermediate: 0.3, advanced: 0.35 },
-  recovery: { beginner: 0.2, intermediate: 0.25, advanced: 0.3 },
+const STRENGTH_STYLE_PROGRESSION_TABLE = {
+  1: { sets: 3, reps: "10-12", intensity: 7, rest: "60s" },
+  2: { sets: 3, reps: "10-12", intensity: 8, rest: "60s" },
+  3: { sets: 4, reps: "8-10", intensity: 8, rest: "75s" },
+  4: { sets: 4, reps: "8-10", intensity: 9, rest: "75s" },
+  5: { sets: 4, reps: "6-8", intensity: 9, rest: "90s" },
+  6: { sets: 4, reps: "6-8", intensity: 10, rest: "90s" },
+  7: { sets: 3, reps: "12-15", intensity: 5, rest: "60s" },
+  8: { sets: 4, reps: "8-10", intensity: 8, rest: "75s" },
+  9: { sets: 4, reps: "6-8", intensity: 9, rest: "90s" },
+  10: { sets: 5, reps: "6-8", intensity: 9, rest: "90s" },
+  11: { sets: 5, reps: "4-6", intensity: 10, rest: "120s" },
+  12: { sets: 4, reps: "4-6", intensity: 10, rest: "120s" },
 };
 
-const REST_VARIANTS = {
-  beginner: ["60-90s", "55-75s", "45-60s", "75-90s"],
-  intermediate: ["45-60s", "40-55s", "35-45s", "50-60s"],
-  advanced: ["30-45s", "30-40s", "25-35s", "35-45s"],
+const ENDURANCE_PROGRESSION_TABLE = {
+  1: { sets: 3, reps: "15-20", intensity: 5, rest: "45s" },
+  2: { sets: 3, reps: "15-20", intensity: 5, rest: "45s" },
+  3: { sets: 4, reps: "15-20", intensity: 6, rest: "40s" },
+  4: { sets: 4, reps: "18-22", intensity: 6, rest: "40s" },
+  5: { sets: 4, reps: "18-22", intensity: 7, rest: "35s" },
+  6: { sets: 3, reps: "12-15", intensity: 5, rest: "45s" },
+  7: { sets: 4, reps: "18-22", intensity: 6, rest: "35s" },
+  8: { sets: 4, reps: "20-25", intensity: 6, rest: "30s" },
+  9: { sets: 4, reps: "20-25", intensity: 7, rest: "30s" },
+  10: { sets: 3, reps: "12-15", intensity: 5, rest: "45s" },
+  11: { sets: 4, reps: "20-25", intensity: 7, rest: "30s" },
+  12: { sets: 4, reps: "20-25", intensity: 7, rest: "30s" },
 };
 
-function difficultyScore(value) {
-  return DIFFICULTY_ORDER[toLower(value)] || 0;
+function clamp(n, min, max) {
+  return Math.min(max, Math.max(min, n));
 }
 
-function getPhaseConfig(weekNumber) {
-  return (
-    WEEK_PHASES.find((phase) => phase.week === weekNumber) || WEEK_PHASES[0]
-  );
-}
+function getProgression(week, baseIntensity, goal) {
+  const goalType = normalizeLower(goal);
+  const table =
+    goalType === "endurance"
+      ? ENDURANCE_PROGRESSION_TABLE
+      : STRENGTH_STYLE_PROGRESSION_TABLE;
+  const template = table[Math.min(12, Math.max(1, week))];
 
-function getRestForPhase(level, weekNumber) {
-  const restSet = REST_VARIANTS[level] || REST_VARIANTS.beginner;
-  return (
-    restSet[weekNumber - 1] || REST_BY_LEVEL[level] || REST_BY_LEVEL.beginner
-  );
-}
-
-function getRepsForPhase(goal, weekNumber) {
-  if (goal === "flexibility" || goal === "recovery") {
-    return "30-45s hold";
-  }
-
-  if (goal === "strength") {
-    if (weekNumber === 3) return "6-10";
-    if (weekNumber === 4) return "8-10";
-    return "8-12";
-  }
-
-  if (goal === "endurance") {
-    if (weekNumber === 2) return "12-16";
-    if (weekNumber === 3) return "14-18";
-    if (weekNumber === 4) return "10-14";
-    return "10-15";
-  }
-
-  if (goal === "weight_loss") {
-    if (weekNumber === 3) return "10-15";
-    if (weekNumber === 4) return "8-12";
-    return "10-12";
-  }
-
-  return REPS_BY_LEVEL.beginner;
-}
-
-function getMainWorkoutSets(goal, level, phase) {
-  const baseSets =
-    goal === "flexibility" || goal === "recovery" ? 2 : SETS_BY_LEVEL[level];
-  const setsDelta = toNumber(phase?.setsDelta, 0);
-
-  if (goal === "flexibility" || goal === "recovery") {
-    return Math.max(2, baseSets + Math.min(0, setsDelta));
-  }
-
-  return Math.max(1, baseSets + setsDelta);
-}
-
-function pickComparator(phase) {
-  if (phase.exerciseMode === "recover") {
-    return (a, b) => {
-      const difficultyDelta =
-        difficultyScore(a.difficulty) - difficultyScore(b.difficulty);
-      if (difficultyDelta !== 0) return difficultyDelta;
-      return (
-        a.durationMin - b.durationMin ||
-        String(a.name).localeCompare(String(b.name))
-      );
+  if (goalType === "endurance") {
+    return {
+      sets: template.sets,
+      reps: template.reps,
+      rest: template.rest,
+      intensity: clamp(template.intensity, 4, 7),
+      tempo: "1-0-1",
+      circuit: true,
+      circuitRoundRest: "60s",
+      isDeload: week === 6 || week === 10,
     };
   }
 
-  if (phase.exerciseMode === "variation" || phase.exerciseMode === "upgrade") {
-    return (a, b) => {
-      const difficultyDelta =
-        difficultyScore(b.difficulty) - difficultyScore(a.difficulty);
-      if (difficultyDelta !== 0) return difficultyDelta;
-      return (
-        a.durationMin - b.durationMin ||
-        String(a.name).localeCompare(String(b.name))
-      );
-    };
+  const intensityDelta = baseIntensity - 6;
+  let intensity = template.intensity + intensityDelta;
+
+  // Keep deload week in a dedicated low-intensity band.
+  if (week === 7) {
+    intensity = clamp(intensity, 5, 6);
+  } else {
+    intensity = clamp(intensity, 4, 10);
   }
-
-  return (a, b) =>
-    a.durationMin - b.durationMin ||
-    String(a.name).localeCompare(String(b.name));
-}
-
-function estimateGoalTimeline(user, goal, level) {
-  const currentWeight = toNumber(
-    user.currentWeight ??
-      user.current_weight ??
-      user.weight ??
-      user.startWeight ??
-      user.profile?.current_weight ??
-      user.profile?.weight,
-    NaN,
-  );
-  const targetWeight = toNumber(
-    user.targetWeight ??
-      user.target_weight ??
-      user.goalWeight ??
-      user.goal_weight ??
-      user.profile?.target_weight ??
-      user.profile?.goal_weight,
-    NaN,
-  );
-  const hasWeightData =
-    Number.isFinite(currentWeight) &&
-    currentWeight > 0 &&
-    Number.isFinite(targetWeight) &&
-    targetWeight > 0 &&
-    currentWeight !== targetWeight;
-
-  const weeklyRate =
-    GOAL_WEEKLY_RATES[goal]?.[level] || GOAL_WEEKLY_RATES.weight_loss.beginner;
-  const fallbackWeeks = goal === "flexibility" || goal === "recovery" ? 4 : 8;
-  const estimatedWeeks = hasWeightData
-    ? Math.max(
-        1,
-        Math.ceil(
-          Math.abs(currentWeight - targetWeight) / Math.max(0.1, weeklyRate),
-        ),
-      )
-    : fallbackWeeks;
-  const estimatedMonths = Number((estimatedWeeks / 4.345).toFixed(1));
 
   return {
-    currentWeight: Number.isFinite(currentWeight) ? currentWeight : null,
-    targetWeight: Number.isFinite(targetWeight) ? targetWeight : null,
-    weeklyRateKg: weeklyRate,
-    estimatedWeeks,
-    estimatedMonths,
-    estimatedReviewDate: new Date(
-      Date.now() + estimatedWeeks * 7 * 24 * 60 * 60 * 1000,
-    ),
-    reviewEveryWeeks: 4,
-    note: hasWeightData
-      ? "Estimate based on the current weight and target weight provided by the user."
-      : "Estimate based on a standard 4-week training block because weight data is incomplete.",
+    sets: template.sets,
+    reps: template.reps,
+    rest: template.rest,
+    intensity,
+    tempo: "2-0-2",
+    circuit: false,
+    circuitRoundRest: "",
+    isDeload: week === 7,
   };
 }
 
-function pickAlternativeExercise({
-  currentExercise,
-  pool,
-  usedIds,
-  phase,
-  level,
-}) {
-  if (!currentExercise) {
-    return null;
-  }
-
-  const currentDifficulty = difficultyScore(currentExercise.difficulty);
-  const sameCategory = pool.filter(
-    (exercise) =>
-      exercise.category === currentExercise.category &&
-      exercise.exerciseId !== currentExercise.exerciseId,
-  );
-
-  const ordered = [...sameCategory].sort(pickComparator(phase));
-
-  let desiredDifficulty = currentDifficulty;
-  if (phase.exerciseMode === "upgrade") {
-    desiredDifficulty = Math.min(
-      currentDifficulty + 1,
-      LEVEL_ORDER[level] || currentDifficulty,
-    );
-  } else if (phase.exerciseMode === "recover") {
-    desiredDifficulty = Math.max(1, currentDifficulty - 1);
-  }
-
-  const exactMatch = ordered.find((exercise) => {
-    const score = difficultyScore(exercise.difficulty);
-    return !usedIds.has(exercise.exerciseId) && score === desiredDifficulty;
-  });
-
-  if (exactMatch) {
-    usedIds.add(exactMatch.exerciseId);
-    return exactMatch;
-  }
-
-  const compatibleMatch = ordered.find((exercise) => {
-    const score = difficultyScore(exercise.difficulty);
-    if (phase.exerciseMode === "upgrade") return score >= desiredDifficulty;
-    if (phase.exerciseMode === "recover") return score <= currentDifficulty;
-    return score === currentDifficulty;
-  });
-
-  if (compatibleMatch) {
-    usedIds.add(compatibleMatch.exerciseId);
-    return compatibleMatch;
-  }
-
-  const fallback =
-    ordered.find((exercise) => !usedIds.has(exercise.exerciseId)) || ordered[0];
-  if (fallback) {
-    usedIds.add(fallback.exerciseId);
-    return fallback;
-  }
-
-  return currentExercise;
+function getIntensityFromBMI(bmiCategory) {
+  const normalized = normalizeLower(bmiCategory);
+  if (normalized === "obese") return 4;
+  if (normalized === "overweight") return 5;
+  if (normalized === "normal") return 6;
+  if (normalized === "underweight") return 5;
+  return 5;
 }
 
-function adjustWorkoutItem(
-  item,
-  phase,
-  level,
-  goal,
-  exerciseLookup,
-  pool,
-  usedIds,
-) {
-  const currentExercise = exerciseLookup.get(String(item.exerciseId));
-  const nextExercise = pickAlternativeExercise({
-    currentExercise,
-    pool,
-    usedIds,
-    phase,
-    level,
-  });
-
-  const adjusted = {
-    ...item,
-    sets: getMainWorkoutSets(goal, level, phase.week),
-    reps: getRepsForPhase(goal, phase.week),
-    rest: getRestForPhase(level, phase.week),
-  };
-
-  if (nextExercise) {
-    adjusted.exerciseId = nextExercise.exerciseId;
-    adjusted.name = nextExercise.name;
-    adjusted.category = nextExercise.category;
-  }
-
-  return adjusted;
+function shouldAddCardio(goal, weightKg, targetWeight) {
+  if (normalizeLower(goal) === "weight_loss") return true;
+  if (Number(weightKg) > Number(targetWeight)) return true;
+  return false;
 }
 
-function buildCyclePlan({ weeklyPlan, exerciseLookup, pool, level, goal }) {
-  return WEEK_PHASES.map((phase) => ({
-    week: phase.week,
-    label: phase.title,
-    progressionNote: phase.progressionNote,
-    days: weeklyPlan.map((dayPlan) => {
-      const usedIds = new Set();
-      const mainWorkout = dayPlan.mainWorkout.map((item) =>
-        adjustWorkoutItem(
-          item,
-          phase,
-          level,
-          goal,
-          exerciseLookup,
-          pool,
-          usedIds,
-        ),
-      );
-
-      return {
-        ...dayPlan,
-        week: phase.week,
-        phase: phase.label,
-        mainWorkout,
-        estimatedCalories: Math.round(
-          toNumber(dayPlan.estimatedCalories, 0) * phase.calorieMultiplier,
-        ),
-      };
-    }),
-  }));
-}
-
-function toLower(value) {
+function normalizeLower(value) {
   return String(value || "")
     .trim()
     .toLowerCase();
 }
 
-function toNumber(value, fallback = 0) {
+function toInt(value, fallback) {
   const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+  return Number.isFinite(n) ? Math.floor(n) : fallback;
 }
 
-function normalizeTrainingUser(user = {}) {
-  const profile = user.profile || {};
-  const workoutDays = Array.isArray(user.workout_days)
-    ? user.workout_days
-    : Array.isArray(profile.workout_days)
-      ? profile.workout_days
-      : [];
-
-  return {
-    ...user,
-    userId: user.userId ?? user.id ?? user._id,
-    focus:
-      user.focus ?? user.focus_goal ?? profile.focus_goal ?? profile.goal ?? "",
-    level:
-      user.level ??
-      user.experience_level ??
-      profile.experience_level ??
-      profile.activity_level_lifestyle ??
-      "",
-    daysPerWeek:
-      user.daysPerWeek ??
-      user.days_per_week ??
-      profile.daysPerWeek ??
-      profile.session_days ??
-      (workoutDays.length > 0 ? workoutDays.length : undefined),
-    sessionDuration:
-      user.sessionDuration ??
-      user.session_duration ??
-      profile.session_duration ??
-      profile.preferred_session_duration,
-    currentWeight:
-      user.currentWeight ??
-      user.current_weight ??
-      profile.current_weight ??
-      profile.weight,
-    targetWeight:
-      user.targetWeight ??
-      user.target_weight ??
-      profile.target_weight ??
-      profile.goal_weight,
-    health:
-      user.health ??
-      (profile.injury_notes
-        ? {
-            knees: profile.injury_notes.toLowerCase().includes("knee"),
-            back: profile.injury_notes.toLowerCase().includes("back"),
-            shoulder: profile.injury_notes.toLowerCase().includes("shoulder"),
-          }
-        : {}),
-  };
+function assert(condition, message, status = 400) {
+  if (!condition) {
+    const error = new Error(message);
+    error.status = status;
+    throw error;
+  }
 }
 
-function normalizeCategory(exercise) {
-  const fromCategory = toLower(exercise?.category);
-  if (
-    ["push", "pull", "legs", "core", "cardio", "mobility"].includes(
-      fromCategory,
-    )
-  ) {
-    return fromCategory;
+function resolveSplitType(splitType, daysPerWeek) {
+  const normalized = normalizeLower(splitType);
+  if (SPLIT_PATTERNS[normalized]) return normalized;
+
+  if (daysPerWeek >= 4) return "push_pull_legs";
+  return "full_body";
+}
+
+function getTargetSessionCalories(level) {
+  if (level === "advanced") return 320;
+  if (level === "intermediate") return 260;
+  return 220;
+}
+
+function getWeekPhase(week) {
+  if (week <= 4) return "base";
+  if (week <= 8) return "variation";
+  return "peak";
+}
+
+function getPlyometricPool(exercises) {
+  return exercises.filter((exercise) => {
+    const name = String(exercise?.name || "").toLowerCase();
+    return /(jump squat|squat jump|box jump|burpee|mountain climber|tuck jump|skater jump|high knees)/i.test(
+      name,
+    );
+  });
+}
+
+async function replaceUserTrainingPlans(userId) {
+  const existingPlans = await TrainingPlan.find({ userId })
+    .select("_id")
+    .lean();
+  if (!existingPlans.length) {
+    return;
   }
 
-  const fromFocus = toLower(exercise?.focus);
-  if (
-    ["push", "pull", "legs", "core", "cardio", "mobility"].includes(fromFocus)
-  ) {
-    return fromFocus;
-  }
+  const existingPlanIds = existingPlans.map((plan) => plan._id);
 
-  return "";
+  await Promise.all([
+    DayExercise.deleteMany({ planId: { $in: existingPlanIds } }),
+    WorkoutDay.deleteMany({ planId: { $in: existingPlanIds } }),
+    TrainingPlan.deleteMany({ userId }),
+  ]);
 }
 
-function isExerciseSafeForHealth(exerciseName, health = {}) {
-  const name = String(exerciseName || "").toLowerCase();
-
-  if (health.knees) {
-    if (/(squat|lunge|jump|leg press)/i.test(name)) return false;
-  }
-
-  if (health.back) {
-    if (/(deadlift|bent[-\s]?over row|sit-?up)/i.test(name)) return false;
-  }
-
-  if (health.shoulder) {
-    if (/(overhead press|pull-?up|dip)/i.test(name)) return false;
-  }
-
-  return true;
+function difficultyScore(value) {
+  return DIFFICULTY_ORDER[normalizeLower(value)] || 0;
 }
 
-function isAllowedByLevel(exercise, userLevel) {
-  const exerciseLevel = toLower(exercise?.difficulty);
-  if (!LEVEL_ORDER[exerciseLevel] || !LEVEL_ORDER[userLevel]) return false;
-  return LEVEL_ORDER[exerciseLevel] <= LEVEL_ORDER[userLevel];
+function sortPool(pool, targetPerExerciseCalories, week) {
+  const phase = getWeekPhase(week);
+
+  const sorted = [...pool].sort((a, b) => {
+    const aDiff = Math.abs(
+      (a.workoutData?.calories || 0) - targetPerExerciseCalories,
+    );
+    const bDiff = Math.abs(
+      (b.workoutData?.calories || 0) - targetPerExerciseCalories,
+    );
+
+    if (phase === "base") {
+      const diffScore =
+        difficultyScore(a.difficulty) - difficultyScore(b.difficulty);
+      if (diffScore !== 0) return diffScore;
+    }
+
+    if (phase === "variation") {
+      const aMid = Math.abs(difficultyScore(a.difficulty) - 2);
+      const bMid = Math.abs(difficultyScore(b.difficulty) - 2);
+      if (aMid !== bMid) return aMid - bMid;
+    }
+
+    if (phase === "peak") {
+      const diffScore =
+        difficultyScore(b.difficulty) - difficultyScore(a.difficulty);
+      if (diffScore !== 0) return diffScore;
+    }
+
+    if (aDiff !== bDiff) return aDiff - bDiff;
+    if (a.durationMin !== b.durationMin) return a.durationMin - b.durationMin;
+    return String(a.name).localeCompare(String(b.name));
+  });
+
+  if (!sorted.length) return sorted;
+
+  const offset = (Math.max(1, week) - 1) % sorted.length;
+  return [...sorted.slice(offset), ...sorted.slice(0, offset)];
 }
 
-function isAllowedForBeginnerStyle(exerciseName, userLevel) {
-  if (userLevel !== "beginner") return true;
-  const name = String(exerciseName || "").toLowerCase();
-  return !/(jump|plyo|burpee|explosive|sprint|box jump)/i.test(name);
-}
-
-function getWeeklyFocus(daysPerWeek) {
-  const pattern = WEEKLY_FOCUS[toNumber(daysPerWeek)] || WEEKLY_FOCUS[3];
-  return [...pattern];
-}
-
-function buildExerciseRecord(exercise) {
-  return {
-    exerciseId: String(exercise._id),
-    name: String(exercise.name || ""),
-    category: normalizeCategory(exercise),
-    difficulty: toLower(exercise.difficulty),
-    durationMin: Math.max(1, toNumber(exercise.durationMin, 1)),
-    calories: Math.max(0, toNumber(exercise?.workoutData?.calories, 0)),
-  };
-}
-
-function pickByTargetMinutes(options, targetMinutes, usedIds, comparator) {
-  const sorted = [...options].sort(
-    comparator || ((a, b) => a.durationMin - b.durationMin),
-  );
+function pickExercises({
+  pool,
+  count,
+  usedWeekIds,
+  blockedMuscleGroups,
+  targetPerExerciseCalories,
+  week,
+}) {
+  const sorted = sortPool(pool, targetPerExerciseCalories, week);
   const picked = [];
-  let total = 0;
 
-  for (const ex of sorted) {
-    if (usedIds.has(ex.exerciseId)) continue;
-    if (total + ex.durationMin > targetMinutes) continue;
-    picked.push(ex);
-    usedIds.add(ex.exerciseId);
-    total += ex.durationMin;
-    if (total >= targetMinutes) break;
+  for (const exercise of sorted) {
+    if (picked.length >= count) break;
+    if (usedWeekIds.has(exercise._id)) continue;
+    if (blockedMuscleGroups.has(exercise.muscleGroup)) continue;
+    picked.push(exercise);
+    usedWeekIds.add(exercise._id);
   }
 
-  // If unique selection cannot reach the target, allow reuse to respect duration rules.
-  if (total < targetMinutes && sorted.length > 0) {
-    let safety = 0;
-    while (total < targetMinutes && safety < 20) {
-      const reusable = sorted.find(
-        (ex) => total + ex.durationMin <= targetMinutes,
-      );
-      if (!reusable) break;
-      picked.push(reusable);
-      total += reusable.durationMin;
-      safety += 1;
+  if (picked.length < count) {
+    for (const exercise of sorted) {
+      if (picked.length >= count) break;
+      if (usedWeekIds.has(exercise._id)) continue;
+      picked.push(exercise);
+      usedWeekIds.add(exercise._id);
     }
   }
 
-  if (picked.length === 0) {
-    const fallback =
-      sorted.find((ex) => !usedIds.has(ex.exerciseId)) || sorted[0];
-    if (fallback) {
-      picked.push(fallback);
-      usedIds.add(fallback.exerciseId);
-      total += fallback.durationMin;
-    }
-  }
-
-  return { picked, total };
+  return picked;
 }
 
-function pickSingleDuration(
-  options,
-  minMinutes,
-  maxMinutes,
-  usedIds,
-  comparator,
-) {
-  const sorted = [...options].sort(
-    comparator || ((a, b) => a.durationMin - b.durationMin),
+function getEligibleExercises(level) {
+  const userLevelScore = LEVEL_ORDER[level];
+
+  return trainingExerciseLibrary.filter((exercise) => {
+    const difficultyScore =
+      LEVEL_ORDER[normalizeLower(exercise.difficulty)] || 0;
+    const category = normalizeLower(exercise.category);
+    const validCategory = [
+      "push",
+      "pull",
+      "legs",
+      "core",
+      "cardio",
+      "mobility",
+    ].includes(category);
+    return (
+      difficultyScore > 0 && difficultyScore <= userLevelScore && validCategory
+    );
+  });
+}
+
+function getPoolByCategory(exercises, category) {
+  return exercises.filter(
+    (exercise) => normalizeLower(exercise.category) === category,
   );
-  for (const ex of sorted) {
-    if (usedIds.has(ex.exerciseId)) continue;
-    if (ex.durationMin >= minMinutes && ex.durationMin <= maxMinutes) {
-      usedIds.add(ex.exerciseId);
-      return ex;
-    }
-  }
-
-  // Reuse is allowed if unique picks are exhausted.
-  for (const ex of sorted) {
-    if (ex.durationMin >= minMinutes && ex.durationMin <= maxMinutes) {
-      usedIds.add(ex.exerciseId);
-      return ex;
-    }
-  }
-
-  for (const ex of sorted) {
-    if (usedIds.has(ex.exerciseId)) continue;
-    if (ex.durationMin <= maxMinutes) {
-      usedIds.add(ex.exerciseId);
-      return ex;
-    }
-  }
-
-  for (const ex of sorted) {
-    if (ex.durationMin <= maxMinutes) {
-      usedIds.add(ex.exerciseId);
-      return ex;
-    }
-  }
-
-  return null;
 }
 
-function mapMainWorkout(exercises, level, goal, phase = WEEK_PHASES[0]) {
-  const sets =
-    goal === "flexibility" || goal === "recovery" ? 2 : SETS_BY_LEVEL[level];
-  const reps =
-    goal === "flexibility" || goal === "recovery"
-      ? "30-45s hold"
-      : REPS_BY_LEVEL[level];
-  const rest = getRestForPhase(level, phase.week);
-
-  return exercises.map((ex) => ({
-    exerciseId: ex.exerciseId,
-    name: ex.name,
-    category: ex.category,
-    sets: getMainWorkoutSets(goal, level, phase.week) || sets,
-    reps: getRepsForPhase(goal, phase.week) || reps,
-    rest,
-  }));
+function filterExercisesByCategoryAndLevel(exercises, category, level) {
+  const maxLevel = LEVEL_ORDER[level] || 0;
+  return exercises.filter((exercise) => {
+    const categoryOk = normalizeLower(exercise.category) === category;
+    const difficultyOk =
+      (LEVEL_ORDER[normalizeLower(exercise.difficulty)] || 0) <= maxLevel;
+    return categoryOk && difficultyOk;
+  });
 }
 
-function mapDurationItems(exercises) {
-  return exercises.map((ex) => ({
-    exerciseId: ex.exerciseId,
-    name: ex.name,
-    duration: `${ex.durationMin} min`,
-  }));
+function generatePushDay(args) {
+  const { exercises, usedWeekIds, blockedMuscleGroups, level, week } = args;
+  const targetSessionCalories = getTargetSessionCalories(level);
+  const categoryPool = filterExercisesByCategoryAndLevel(
+    exercises,
+    "push",
+    level,
+  );
+  const compoundPool = categoryPool.filter(
+    (exercise) => exercise.type === "compound",
+  );
+  const isolationPool = categoryPool.filter(
+    (exercise) => exercise.type === "isolation",
+  );
+
+  const compound = pickExercises({
+    pool: compoundPool,
+    count: MAIN_RULES.push.compound,
+    usedWeekIds,
+    blockedMuscleGroups,
+    targetPerExerciseCalories: Math.round(targetSessionCalories / 3),
+    week,
+  });
+
+  const isolation = pickExercises({
+    pool: isolationPool,
+    count: MAIN_RULES.push.isolation,
+    usedWeekIds,
+    blockedMuscleGroups,
+    targetPerExerciseCalories: Math.round(targetSessionCalories / 3),
+    week,
+  });
+
+  assert(
+    compound.length === 1 && isolation.length === 2,
+    "Insufficient push exercises to satisfy rule set",
+  );
+  return [...compound, ...isolation];
 }
 
-function ensureValidInput(payload) {
-  const user = normalizeTrainingUser(payload?.user);
+function generatePullDay(args) {
+  const { exercises, usedWeekIds, blockedMuscleGroups, level, week } = args;
+  const targetSessionCalories = getTargetSessionCalories(level);
+  const categoryPool = filterExercisesByCategoryAndLevel(
+    exercises,
+    "pull",
+    level,
+  );
+  const compoundPool = categoryPool.filter(
+    (exercise) => exercise.type === "compound",
+  );
+  const isolationPool = categoryPool.filter(
+    (exercise) => exercise.type === "isolation",
+  );
 
-  if (!user) {
-    const err = new Error("Input must include user object");
-    err.status = 400;
-    throw err;
-  }
+  const compound = pickExercises({
+    pool: compoundPool,
+    count: MAIN_RULES.pull.compound,
+    usedWeekIds,
+    blockedMuscleGroups,
+    targetPerExerciseCalories: Math.round(targetSessionCalories / 3),
+    week,
+  });
 
-  if (!user.userId) {
-    const err = new Error("user.userId is required");
-    err.status = 400;
-    throw err;
-  }
+  const isolation = pickExercises({
+    pool: isolationPool,
+    count: MAIN_RULES.pull.isolation,
+    usedWeekIds,
+    blockedMuscleGroups,
+    targetPerExerciseCalories: Math.round(targetSessionCalories / 3),
+    week,
+  });
 
-  const days = toNumber(user.daysPerWeek, 0);
-  if (![3, 4, 5, 6].includes(days)) {
-    const err = new Error("daysPerWeek must be one of: 3, 4, 5, 6");
-    err.status = 400;
-    throw err;
-  }
+  assert(
+    compound.length === 1 && isolation.length === 2,
+    "Insufficient pull exercises to satisfy rule set",
+  );
+  return [...compound, ...isolation];
+}
 
-  const duration = toNumber(user.sessionDuration, 0);
-  if (duration < 15) {
-    const err = new Error("sessionDuration must be at least 15 minutes");
-    err.status = 400;
-    throw err;
-  }
+function generateLegsDay(args) {
+  const { exercises, usedWeekIds, blockedMuscleGroups, week, level } = args;
+  const targetSessionCalories = getTargetSessionCalories(level);
+  const categoryPool = filterExercisesByCategoryAndLevel(
+    exercises,
+    "legs",
+    level,
+  );
+  const compoundPool = categoryPool.filter(
+    (exercise) => exercise.type === "compound",
+  );
+  const isolationPool = categoryPool.filter(
+    (exercise) => exercise.type === "isolation",
+  );
+  const isolationCount = week >= 3 ? 3 : 2;
 
-  const level = toLower(user.level);
-  if (!LEVEL_ORDER[level]) {
-    const err = new Error(
-      "user.level must be beginner, intermediate, or advanced",
+  const compound = pickExercises({
+    pool: compoundPool,
+    count: 1,
+    usedWeekIds,
+    blockedMuscleGroups,
+    targetPerExerciseCalories: Math.round(
+      targetSessionCalories / (1 + isolationCount),
+    ),
+    week,
+  });
+
+  const isolation = pickExercises({
+    pool: isolationPool,
+    count: isolationCount,
+    usedWeekIds,
+    blockedMuscleGroups,
+    targetPerExerciseCalories: Math.round(
+      targetSessionCalories / (1 + isolationCount),
+    ),
+    week,
+  });
+
+  assert(
+    compound.length === 1 && isolation.length >= 2,
+    "Insufficient legs exercises to satisfy rule set",
+  );
+  return [...compound, ...isolation];
+}
+
+function generateFullBodyDay(args) {
+  const { exercises, usedWeekIds, blockedMuscleGroups, level, week } = args;
+  const targetSessionCalories = getTargetSessionCalories(level);
+
+  const push = pickExercises({
+    pool: filterExercisesByCategoryAndLevel(exercises, "push", level),
+    count: 1,
+    usedWeekIds,
+    blockedMuscleGroups,
+    targetPerExerciseCalories: Math.round(targetSessionCalories / 3),
+    week,
+  });
+  const pull = pickExercises({
+    pool: filterExercisesByCategoryAndLevel(exercises, "pull", level),
+    count: 1,
+    usedWeekIds,
+    blockedMuscleGroups,
+    targetPerExerciseCalories: Math.round(targetSessionCalories / 3),
+    week,
+  });
+  const legs = pickExercises({
+    pool: filterExercisesByCategoryAndLevel(exercises, "legs", level),
+    count: 1,
+    usedWeekIds,
+    blockedMuscleGroups,
+    targetPerExerciseCalories: Math.round(targetSessionCalories / 3),
+    week,
+  });
+
+  assert(
+    push.length === 1 && pull.length === 1 && legs.length === 1,
+    "Insufficient exercises to satisfy full body rule set",
+  );
+  return [...push, ...pull, ...legs];
+}
+
+function buildMainWorkoutByDayType({
+  dayType,
+  exercises,
+  usedWeekIds,
+  blockedMuscleGroups,
+  week,
+  level,
+}) {
+  if (dayType === "push")
+    return generatePushDay({
+      exercises,
+      usedWeekIds,
+      blockedMuscleGroups,
+      level,
+      week,
+    });
+  if (dayType === "pull")
+    return generatePullDay({
+      exercises,
+      usedWeekIds,
+      blockedMuscleGroups,
+      level,
+      week,
+    });
+  if (dayType === "legs")
+    return generateLegsDay({
+      exercises,
+      usedWeekIds,
+      blockedMuscleGroups,
+      week,
+      level,
+    });
+  if (dayType === "full_body")
+    return generateFullBodyDay({
+      exercises,
+      usedWeekIds,
+      blockedMuscleGroups,
+      level,
+      week,
+    });
+
+  return [];
+}
+
+function createBlockRecords({ block, exercises, progression, level }) {
+  const restSeconds =
+    Number.parseInt(
+      String(progression.rest || "60").replace(/[^0-9]/g, ""),
+      10,
+    ) || 60;
+
+  return exercises.map((exercise) => {
+    const sets = progression.sets;
+    const reps = progression.reps || BASE_REPS[level] || "10-12";
+    const mainRestSeconds = progression.circuit ? 0 : restSeconds;
+
+    return {
+      exerciseId: String(exercise._id),
+      name: exercise.name,
+      category: exercise.category,
+      muscleGroup: exercise.muscleGroup,
+      type: exercise.type,
+      block,
+      sets,
+      reps,
+      durationMin: exercise.durationMin,
+      restSeconds: block === "mainWorkout" ? mainRestSeconds : restSeconds,
+      intensity: progression.intensity,
+      volume: `${sets}x${reps}`,
+      estimatedCalories: exercise.workoutData?.calories || 0,
+    };
+  });
+}
+
+function splitBlocksWithinLimit(mainWorkout, mobilityPool, usedWeekIds) {
+  const maxExercisesPerDay = 5;
+  const blocks = {
+    warmUp: [],
+    mainWorkout,
+    cooldown: [],
+  };
+
+  if (mainWorkout.length < maxExercisesPerDay) {
+    const warm = mobilityPool.find(
+      (exercise) => !usedWeekIds.has(exercise._id),
     );
-    err.status = 400;
-    throw err;
+    if (warm) {
+      usedWeekIds.add(warm._id);
+      blocks.warmUp = [warm];
+    }
   }
 
-  const goal = toLower(user.focus);
-  if (!GOAL_RATIOS[goal]) {
-    const err = new Error(
-      "user.focus must be weight_loss, strength, endurance, flexibility, or recovery",
+  if (blocks.warmUp.length + mainWorkout.length < maxExercisesPerDay) {
+    const cool = mobilityPool.find(
+      (exercise) => !usedWeekIds.has(exercise._id),
     );
-    err.status = 400;
-    throw err;
+    if (cool) {
+      usedWeekIds.add(cool._id);
+      blocks.cooldown = [cool];
+    }
   }
+
+  const total =
+    blocks.warmUp.length + blocks.mainWorkout.length + blocks.cooldown.length;
+  assert(total <= maxExercisesPerDay, "Daily exercise count exceeds max of 5");
+  assert(blocks.mainWorkout.length > 0, "mainWorkout block is required");
+
+  return blocks;
+}
+
+function mapResponseDay({ workoutDayDoc, progression, blocks, level }) {
+  const toSimple = (items) =>
+    items.map((item) => ({
+      exerciseId: String(item._id),
+      name: item.name,
+      category: item.category,
+      muscleGroup: item.muscleGroup,
+      type: item.type,
+      intensity: progression.intensity,
+      sets: progression.sets,
+      reps: progression.reps || BASE_REPS[level] || "10-12",
+      rest: progression.rest || "60s",
+      tempo: progression.tempo || "2-0-2",
+      circuit: Boolean(progression.circuit),
+      circuitRoundRest: progression.circuitRoundRest || "",
+      volume: `${progression.sets}x${progression.reps || BASE_REPS[level] || "10-12"}`,
+      durationMin: item.durationMin,
+      calories: item.workoutData?.calories || 0,
+    }));
+
+  return {
+    workoutDayId: String(workoutDayDoc._id),
+    dayNumber: workoutDayDoc.dayNumber,
+    dayType: workoutDayDoc.dayType,
+    progression,
+    warmUp: toSimple(blocks.warmUp),
+    mainWorkout: toSimple(blocks.mainWorkout),
+    cooldown: toSimple(blocks.cooldown),
+  };
 }
 
 class TrainingPlanService {
-  generatePlan(payload) {
-    ensureValidInput(payload);
+  async generatePlan(payload = {}) {
+    const userId = payload.userId;
+    const goal = normalizeLower(payload.goal);
+    const level = normalizeLower(payload.level);
+    const durationWeeks = toInt(payload.durationWeeks, 4);
+    const weightKg = Number(payload.weightKg);
+    const heightCm = Number(payload.heightCm);
+    const age = Number(payload.age);
+    const gender = payload.gender;
+    const targetWeight = Number(payload.targetWeight);
 
-    const user = normalizeTrainingUser(payload.user);
-    const level = toLower(user.level);
-    const goal = toLower(user.focus);
-    const sessionDuration = toNumber(user.sessionDuration, 30);
-    const daysPerWeek = toNumber(user.daysPerWeek, 3);
+    assert(userId, "userId is required");
+    assert(GOAL_ENUM.includes(goal), "goal is invalid");
+    assert(
+      LEVEL_ORDER[level],
+      "level must be beginner, intermediate, or advanced",
+    );
+    assert(
+      durationWeeks >= 1 && durationWeeks <= 12,
+      "durationWeeks must be between 1 and 12",
+    );
+    assert(Number.isFinite(weightKg) && weightKg > 0, "weightKg is required");
+    assert(Number.isFinite(heightCm) && heightCm > 0, "heightCm is required");
+    assert(Number.isFinite(age) && age > 0, "age is required");
+    assert(
+      ["male", "female"].includes(normalizeLower(gender)),
+      "gender must be male or female",
+    );
+    assert(
+      Number.isFinite(targetWeight) && targetWeight > 0,
+      "targetWeight is required",
+    );
 
-    const sourceExercises =
-      Array.isArray(payload?.exercises) && payload.exercises.length
-        ? payload.exercises
-        : trainingExerciseLibrary;
+    const { bmi, bmi_category, calorieTarget } = calculateMetrics({
+      weightKg,
+      heightCm,
+      age,
+      gender: normalizeLower(gender),
+      targetWeight,
+      level,
+    });
+    const baseIntensity = getIntensityFromBMI(bmi_category);
+    const addCardio = shouldAddCardio(goal, weightKg, targetWeight);
 
-    const candidateExercises = sourceExercises
-      .map(buildExerciseRecord)
-      .filter((ex) => ex.exerciseId && ex.name && ex.category)
-      .filter((ex) => isAllowedByLevel(ex, level))
-      .filter((ex) => isAllowedForBeginnerStyle(ex.name, level))
-      .filter((ex) => isExerciseSafeForHealth(ex.name, user.health || {}));
+    const userExists = await User.exists({ _id: userId });
+    assert(userExists, "User not found", 404);
 
-    if (candidateExercises.length === 0) {
-      const err = new Error(
-        "No eligible exercises available after safety and level filtering",
-      );
-      err.status = 400;
-      throw err;
-    }
+    await replaceUserTrainingPlans(userId);
 
-    const byCategory = {
-      push: candidateExercises.filter((e) => e.category === "push"),
-      pull: candidateExercises.filter((e) => e.category === "pull"),
-      legs: candidateExercises.filter((e) => e.category === "legs"),
-      core: candidateExercises.filter((e) => e.category === "core"),
-      cardio: candidateExercises.filter((e) => e.category === "cardio"),
-      mobility: candidateExercises.filter((e) => e.category === "mobility"),
-    };
+    let splitType = resolveSplitType(
+      payload.splitType,
+      toInt(payload.daysPerWeek, 3),
+    );
+    let splitPattern = SPLIT_PATTERNS[splitType];
 
-    if (byCategory.mobility.length === 0) {
-      const err = new Error(
-        "At least one mobility exercise is required for warm-up/cooldown",
-      );
-      err.status = 400;
-      throw err;
-    }
+    const eligibleExercises = getEligibleExercises(level);
+    assert(
+      eligibleExercises.length > 0,
+      "No exercises available for this level",
+    );
 
-    const strengthPool = [
-      ...byCategory.push,
-      ...byCategory.pull,
-      ...byCategory.legs,
-    ];
+    const pushDaysInPattern = splitPattern.filter(
+      (dayType) => dayType === "push",
+    ).length;
+    const pushPool = getPoolByCategory(eligibleExercises, "push");
+    const pushCompoundCount = pushPool.filter(
+      (exercise) => exercise.type === "compound",
+    ).length;
+    const pushIsolationCount = pushPool.filter(
+      (exercise) => exercise.type === "isolation",
+    ).length;
+
     if (
-      ["weight_loss", "strength", "endurance"].includes(goal) &&
-      (strengthPool.length === 0 || byCategory.core.length === 0)
+      pushDaysInPattern > 0 &&
+      (pushCompoundCount < pushDaysInPattern ||
+        pushIsolationCount < pushDaysInPattern * 2)
     ) {
-      const err = new Error(
-        "Insufficient strength/core exercises for selected goal",
-      );
-      err.status = 400;
-      throw err;
+      splitType = "full_body";
+      splitPattern = SPLIT_PATTERNS[splitType];
     }
 
-    if (
-      ["weight_loss", "strength", "endurance"].includes(goal) &&
-      byCategory.cardio.length === 0
-    ) {
-      const err = new Error("Cardio exercises are required for selected goal");
-      err.status = 400;
-      throw err;
+    const daysPerWeek = splitPattern.filter(
+      (dayType) => dayType !== "rest",
+    ).length;
+
+    const mobilityPool = getPoolByCategory(eligibleExercises, "mobility");
+    const cardioPool = getPoolByCategory(eligibleExercises, "cardio");
+    const plyometricPool = getPlyometricPool(eligibleExercises);
+    assert(
+      mobilityPool.length > 0,
+      "At least one mobility exercise is required",
+    );
+    if (addCardio) {
+      assert(
+        cardioPool.length > 0,
+        "Cardio pool is required when cardio is enabled",
+      );
     }
 
-    const focusPattern = getWeeklyFocus(daysPerWeek);
-    const ratios = GOAL_RATIOS[goal];
+    const trainingPlan = await TrainingPlan.create({
+      userId,
+      goal,
+      level,
+      daysPerWeek,
+      splitType,
+      durationWeeks,
+      targetWeight,
+      bmi,
+      bmiCategory: bmi_category,
+      calorieTarget,
+      summary: {
+        trainingStyle: splitType,
+        daysPerWeek,
+        sessionDuration: 45,
+      },
+      weeklyPlan: [],
+      cyclePlan: [],
+      progressionPlan: {
+        week1: `${getProgression(1, baseIntensity, goal).sets} sets - intensity ${getProgression(1, baseIntensity, goal).intensity}`,
+        week2: `${getProgression(2, baseIntensity, goal).sets} sets - intensity ${getProgression(2, baseIntensity, goal).intensity}`,
+        week3: `${getProgression(3, baseIntensity, goal).sets} sets - intensity ${getProgression(3, baseIntensity, goal).intensity}`,
+        week4: `${getProgression(4, baseIntensity, goal).sets} sets - intensity ${getProgression(4, baseIntensity, goal).intensity}`,
+      },
+      safetyNotes: [
+        "Keep form strict on all compound lifts.",
+        "Stop the set if pain appears.",
+      ],
+    });
 
-    const weeklyPlan = [];
+    const weeks = [];
 
-    for (let i = 0; i < focusPattern.length; i += 1) {
-      const day = i + 1;
-      const focus = focusPattern[i];
-      const usedIds = new Set();
+    for (let week = 1; week <= durationWeeks; week += 1) {
+      const progression = getProgression(week, baseIntensity, goal);
+      const weekUsedIds = new Set();
+      const weekDays = [];
+      let previousDayMuscleGroups = new Set();
 
-      const warmUpExercise = pickSingleDuration(
-        byCategory.mobility,
-        5,
-        10,
-        usedIds,
-      );
-      if (!warmUpExercise) {
-        const err = new Error(
-          "Unable to build warm-up section from available exercises",
-        );
-        err.status = 400;
-        throw err;
-      }
+      for (let dayIndex = 0; dayIndex < splitPattern.length; dayIndex += 1) {
+        const dayNumber = dayIndex + 1;
+        const dayType = splitPattern[dayIndex];
 
-      const cooldownExercise =
-        pickSingleDuration(byCategory.mobility, 5, 6, usedIds) ||
-        warmUpExercise;
-      if (!usedIds.has(cooldownExercise.exerciseId)) {
-        usedIds.add(cooldownExercise.exerciseId);
-      }
+        const workoutDayDoc = await WorkoutDay.create({
+          planId: trainingPlan._id,
+          weekNumber: week,
+          dayNumber,
+          dayType,
+        });
 
-      const baseMinutes =
-        warmUpExercise.durationMin + cooldownExercise.durationMin;
-      const cardioTarget = ["weight_loss", "strength", "endurance"].includes(
-        goal,
-      )
-        ? Math.max(6, Math.round(sessionDuration * ratios.cardio))
-        : 0;
+        if (dayType === "rest") {
+          weekDays.push({
+            workoutDayId: String(workoutDayDoc._id),
+            dayNumber,
+            dayType,
+            progression,
+            warmUp: [],
+            mainWorkout: [],
+            cooldown: [],
+          });
+          previousDayMuscleGroups = new Set();
+          continue;
+        }
 
-      const remainingForMainAndCardio = Math.max(
-        0,
-        sessionDuration - baseMinutes,
-      );
-      const cardioBudget = Math.min(cardioTarget, remainingForMainAndCardio);
-      let mainBudget = Math.max(0, remainingForMainAndCardio - cardioBudget);
+        const mainWorkout = buildMainWorkoutByDayType({
+          dayType,
+          exercises: eligibleExercises,
+          usedWeekIds: weekUsedIds,
+          blockedMuscleGroups: previousDayMuscleGroups,
+          week,
+          level,
+        });
 
-      if (mainBudget === 0 && remainingForMainAndCardio > 0) {
-        mainBudget = remainingForMainAndCardio;
-      }
+        if (goal === "endurance") {
+          const hasPlyometric = mainWorkout.some((exercise) => {
+            const name = String(exercise?.name || "").toLowerCase();
+            return /(jump squat|squat jump|box jump|burpee|mountain climber|tuck jump|skater jump|high knees)/i.test(
+              name,
+            );
+          });
 
-      let dailyMainPool = strengthPool;
-      if (focus === "push") dailyMainPool = byCategory.push;
-      if (focus === "pull") dailyMainPool = byCategory.pull;
-      if (focus === "legs") dailyMainPool = byCategory.legs;
-      if (focus === "core") dailyMainPool = byCategory.core;
-      if (focus === "full_body")
-        dailyMainPool = [...strengthPool, ...byCategory.core];
+          if (!hasPlyometric && plyometricPool.length > 0) {
+            const plyoPick = pickExercises({
+              pool: plyometricPool,
+              count: 1,
+              usedWeekIds: weekUsedIds,
+              blockedMuscleGroups: new Set(),
+              targetPerExerciseCalories: Math.round(
+                getTargetSessionCalories(level) / 3,
+              ),
+              week,
+            });
 
-      if (goal === "flexibility" || goal === "recovery") {
-        dailyMainPool = byCategory.mobility;
-      }
-
-      const mainExercises = [];
-      let mainMinutes = 0;
-
-      if (goal === "flexibility" || goal === "recovery") {
-        const pickedMain = pickByTargetMinutes(
-          dailyMainPool,
-          mainBudget,
-          usedIds,
-        );
-        mainExercises.push(...pickedMain.picked);
-        mainMinutes += pickedMain.total;
-      } else {
-        const nonCardioTotal = ratios.strength + ratios.core;
-        const strengthShare =
-          nonCardioTotal > 0 ? ratios.strength / nonCardioTotal : 0.5;
-        const coreShare =
-          nonCardioTotal > 0 ? ratios.core / nonCardioTotal : 0.5;
-
-        const strengthTarget = Math.max(
-          1,
-          Math.round(mainBudget * strengthShare),
-        );
-        const coreTarget = Math.max(1, mainBudget - strengthTarget);
-
-        const strengthFromFocus = pickByTargetMinutes(
-          dailyMainPool,
-          strengthTarget,
-          usedIds,
-        );
-        mainExercises.push(...strengthFromFocus.picked);
-        mainMinutes += strengthFromFocus.total;
-
-        const corePick = pickByTargetMinutes(
-          byCategory.core,
-          coreTarget,
-          usedIds,
-        );
-        mainExercises.push(...corePick.picked);
-        mainMinutes += corePick.total;
-
-        const hasCoreInMain = mainExercises.some(
-          (item) => item.category === "core",
-        );
-        if (!hasCoreInMain && byCategory.core.length > 0) {
-          const forcedCore = pickByTargetMinutes(byCategory.core, 1, usedIds);
-          if (forcedCore.picked.length > 0) {
-            mainExercises.push(...forcedCore.picked);
-            mainMinutes += forcedCore.total;
+            if (plyoPick.length === 1) {
+              if (mainWorkout.length >= 4) {
+                mainWorkout[mainWorkout.length - 1] = plyoPick[0];
+              } else {
+                mainWorkout.push(plyoPick[0]);
+              }
+            }
           }
         }
 
-        if (mainMinutes < mainBudget) {
-          const extraStrength = pickByTargetMinutes(
-            strengthPool,
-            mainBudget - mainMinutes,
-            usedIds,
-          );
-          mainExercises.push(...extraStrength.picked);
-          mainMinutes += extraStrength.total;
+        if (addCardio) {
+          const cardioPick = pickExercises({
+            pool: cardioPool,
+            count: 1,
+            usedWeekIds: weekUsedIds,
+            blockedMuscleGroups: new Set(),
+            targetPerExerciseCalories: Math.round(
+              getTargetSessionCalories(level) / 3,
+            ),
+            week,
+          });
+          assert(cardioPick.length === 1, "Unable to add cardio exercise");
+          mainWorkout.push({
+            ...cardioPick[0],
+            durationMin: 10 + week * 2,
+          });
         }
-      }
 
-      const cardioExercises = [];
-      let cardioMinutes = 0;
-      if (
-        ["weight_loss", "strength", "endurance"].includes(goal) &&
-        cardioBudget > 0
-      ) {
-        const cardioPick = pickByTargetMinutes(
-          byCategory.cardio,
-          cardioBudget,
-          usedIds,
+        const blocks = splitBlocksWithinLimit(
+          mainWorkout,
+          mobilityPool,
+          weekUsedIds,
         );
-        cardioExercises.push(...cardioPick.picked);
-        cardioMinutes += cardioPick.total;
-      }
 
-      let totalDuration =
-        warmUpExercise.durationMin +
-        cooldownExercise.durationMin +
-        mainMinutes +
-        cardioMinutes;
+        const mainRecords = createBlockRecords({
+          block: "mainWorkout",
+          exercises: blocks.mainWorkout,
+          progression,
+          level,
+        });
+        const warmRecords = createBlockRecords({
+          block: "warmUp",
+          exercises: blocks.warmUp,
+          progression,
+          level,
+        });
+        const cooldownRecords = createBlockRecords({
+          block: "cooldown",
+          exercises: blocks.cooldown,
+          progression,
+          level,
+        });
 
-      if (
-        totalDuration > sessionDuration &&
-        goal !== "flexibility" &&
-        goal !== "recovery"
-      ) {
-        const nonCoreIndex = mainExercises.findIndex(
-          (item) => item.category !== "core",
+        const allRecords = [
+          ...warmRecords,
+          ...mainRecords,
+          ...cooldownRecords,
+        ].map((record) => ({
+          ...record,
+          planId: trainingPlan._id,
+          workoutDayId: workoutDayDoc._id,
+        }));
+
+        assert(allRecords.length <= 5, "Max 5 exercises per day exceeded");
+
+        await DayExercise.insertMany(allRecords);
+
+        previousDayMuscleGroups = new Set(
+          blocks.mainWorkout.map((exercise) => exercise.muscleGroup),
         );
-        const coreIndex = mainExercises.findIndex(
-          (item) => item.category === "core",
+
+        weekDays.push(
+          mapResponseDay({
+            workoutDayDoc,
+            progression,
+            blocks,
+            level,
+          }),
         );
-        if (nonCoreIndex >= 0 && coreIndex >= 0 && nonCoreIndex !== coreIndex) {
-          const removed = mainExercises.splice(nonCoreIndex, 1)[0];
-          mainMinutes -= removed.durationMin;
-          totalDuration -= removed.durationMin;
-        }
       }
 
-      if (mainExercises.length === 0) {
-        const err = new Error(
-          "Unable to build main workout with provided exercises and duration",
-        );
-        err.status = 400;
-        throw err;
-      }
-
-      if (
-        ["weight_loss", "strength", "endurance"].includes(goal) &&
-        cardioExercises.length === 0
-      ) {
-        const err = new Error(
-          "Unable to build cardio section with provided exercises and duration",
-        );
-        err.status = 400;
-        throw err;
-      }
-
-      if (totalDuration < sessionDuration - 5) {
-        const gap = Math.min(sessionDuration - totalDuration, 5);
-        const fillerPool =
-          goal === "flexibility" || goal === "recovery"
-            ? byCategory.mobility
-            : [...strengthPool, ...byCategory.core];
-        const filler = pickByTargetMinutes(fillerPool, gap, usedIds);
-        if (filler.picked.length) {
-          mainExercises.push(...filler.picked);
-          mainMinutes += filler.total;
-          totalDuration += filler.total;
-        }
-      }
-
-      if (totalDuration > sessionDuration) {
-        const err = new Error(
-          "Unable to satisfy session duration limit with provided exercises",
-        );
-        err.status = 400;
-        throw err;
-      }
-
-      if (totalDuration < sessionDuration - 5) {
-        const err = new Error(
-          "Unable to satisfy session duration range (sessionDuration ±5) with provided exercises",
-        );
-        err.status = 400;
-        throw err;
-      }
-
-      const estimatedCalories = [
-        warmUpExercise,
-        cooldownExercise,
-        ...mainExercises,
-        ...cardioExercises,
-      ].reduce((sum, ex) => sum + toNumber(ex.calories, 0), 0);
-
-      weeklyPlan.push({
-        day,
-        focus,
-        warmUp: mapDurationItems([warmUpExercise]),
-        mainWorkout: mapMainWorkout(mainExercises, level, goal),
-        cardio: mapDurationItems(cardioExercises),
-        cooldown: mapDurationItems([cooldownExercise]),
-        duration: totalDuration,
-        estimatedCalories,
+      weeks.push({
+        weekNumber: week,
+        progression,
+        days: weekDays,
       });
     }
 
-    const exerciseLookup = new Map(
-      candidateExercises.map((exercise) => [
-        String(exercise.exerciseId),
-        exercise,
-      ]),
-    );
-    const cyclePlan = buildCyclePlan({
-      weeklyPlan,
-      exerciseLookup,
-      pool: candidateExercises,
-      level,
-      goal,
-    });
-    const goalTimeline = estimateGoalTimeline(user, goal, level);
-
-    const safetyNotes = [
-      "Stop immediately if pain, dizziness, or unusual discomfort appears.",
-      "Maintain form quality and controlled tempo for every set.",
-      `Rest ${REST_BY_LEVEL[level]} between sets as prescribed for your level.`,
-    ];
-
-    if (user?.health?.knees) {
-      safetyNotes.push(
-        "Knee-sensitive movements were excluded (squats, lunges, jumps, leg press).",
-      );
-    }
-    if (user?.health?.back) {
-      safetyNotes.push(
-        "Back-sensitive movements were excluded (deadlifts, bent-over rows, sit-ups).",
-      );
-    }
-    if (user?.health?.shoulder) {
-      safetyNotes.push(
-        "Shoulder-sensitive movements were excluded (overhead press, pull-ups, dips).",
-      );
-    }
-
     return {
-      userId: String(user.userId),
+      planId: String(trainingPlan._id),
+      userId: String(userId),
       goal,
       level,
-      targetWeight: toNumber(user.targetWeight, 0),
-      summary: {
-        trainingStyle:
-          goal === "weight_loss"
-            ? "fat-loss hybrid"
-            : goal === "strength"
-              ? "strength progression"
-              : goal === "endurance"
-                ? "cardio-endurance"
-                : "mobility-recovery",
-        daysPerWeek,
-        sessionDuration,
-      },
-      weeklyPlan,
-      cyclePlan,
-      goalTimeline,
-      progressionPlan: {
-        week1: "Establish baseline technique and consistent pacing.",
-        week2:
-          "Increase volume slightly and rotate a similar movement variation.",
-        week3: "Raise effort with tighter rest control and cleaner execution.",
-        week4: "Deload intensity by 10-15% while preserving movement quality.",
-      },
-      safetyNotes,
+      splitType,
+      daysPerWeek,
+      durationWeeks,
+      bmi,
+      bmiCategory: bmi_category,
+      calorieTarget,
+      weeks,
     };
   }
 
-  async savePlan(planData) {
-    const payload = {
-      ...planData,
-      startDate: new Date(),
-      durationWeeks: 4,
-    };
+  async getPlanById(planId) {
+    assert(planId, "planId is required");
 
-    return TrainingPlan.create(payload);
+    const trainingPlan = await TrainingPlan.findById(planId).lean();
+    if (!trainingPlan) {
+      const error = new Error("Training plan not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const [workoutDays, exercises] = await Promise.all([
+      WorkoutDay.find({ planId: trainingPlan._id })
+        .sort({ weekNumber: 1, dayNumber: 1 })
+        .lean(),
+      DayExercise.find({ planId: trainingPlan._id })
+        .sort({ createdAt: 1 })
+        .lean(),
+    ]);
+
+    const exercisesByWorkoutDay = exercises.reduce((accumulator, item) => {
+      const key = String(item.workoutDayId);
+      if (!accumulator[key]) {
+        accumulator[key] = { warmUp: [], mainWorkout: [], cooldown: [] };
+      }
+      if (accumulator[key][item.block]) {
+        accumulator[key][item.block].push(item);
+      }
+      return accumulator;
+    }, {});
+
+    const weeks = [];
+    const weekMap = new Map();
+
+    for (const workoutDay of workoutDays) {
+      const groupedBlocks = exercisesByWorkoutDay[String(workoutDay._id)] || {
+        warmUp: [],
+        mainWorkout: [],
+        cooldown: [],
+      };
+
+      const dayResponse = {
+        workoutDayId: String(workoutDay._id),
+        dayNumber: workoutDay.dayNumber,
+        dayType: workoutDay.dayType,
+        warmUp: groupedBlocks.warmUp,
+        mainWorkout: groupedBlocks.mainWorkout,
+        cooldown: groupedBlocks.cooldown,
+      };
+
+      if (!weekMap.has(workoutDay.weekNumber)) {
+        weekMap.set(workoutDay.weekNumber, {
+          weekNumber: workoutDay.weekNumber,
+          days: [],
+        });
+        weeks.push(weekMap.get(workoutDay.weekNumber));
+      }
+
+      weekMap.get(workoutDay.weekNumber).days.push(dayResponse);
+    }
+
+    return {
+      planId: String(trainingPlan._id),
+      userId: String(trainingPlan.userId),
+      goal: trainingPlan.goal,
+      level: trainingPlan.level,
+      splitType: trainingPlan.splitType,
+      daysPerWeek: trainingPlan.daysPerWeek,
+      durationWeeks: trainingPlan.durationWeeks,
+      bmi: trainingPlan.bmi,
+      bmiCategory: trainingPlan.bmiCategory,
+      calorieTarget: trainingPlan.calorieTarget,
+      weeks,
+    };
+  }
+
+  async getLatestPlanByUserId(userId) {
+    assert(userId, "userId is required");
+
+    const latestPlan = await TrainingPlan.findOne({ userId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!latestPlan) {
+      const error = new Error("Training plan not found for this user");
+      error.status = 404;
+      throw error;
+    }
+
+    return this.getPlanById(latestPlan._id);
   }
 }
 
 module.exports = new TrainingPlanService();
+module.exports.LEVEL_ORDER = LEVEL_ORDER;
+module.exports.getProgression = getProgression;
+module.exports.getIntensityFromBMI = getIntensityFromBMI;
+module.exports.shouldAddCardio = shouldAddCardio;
