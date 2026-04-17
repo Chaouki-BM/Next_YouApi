@@ -12,7 +12,12 @@ const WorkoutDay = require("../models/WorkoutDay.model");
 const DayExercise = require("../models/DayExercise.model");
 const NutritionPlan = require("../models/NutritionPlan.model");
 const Meal = require("../models/Meal.model");
-const generateFitnessPdf = require("../utils/generateFitnessPdf");
+const { generateFitnessPdf } = require("../utils/generateFitnessPdf");
+const {
+  generateNutritionPlanFromGemini,
+  saveNutritionPlan,
+} = require("./nutritionPlan.service");
+const trainingPlanService = require("./TrainingPlan.service");
 // Nodemailer configuration
 const transporter = nodemailer.createTransport({
   service: process.env.EMAIL_SERVICE || "gmail",
@@ -47,6 +52,51 @@ const normalizeStringArray = (value) => {
   return [];
 };
 
+const toNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const toTrainingLevel = (value) => {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  if (["beginner", "intermediate", "advanced"].includes(normalized)) {
+    return normalized;
+  }
+  if (normalized === "athlete") {
+    return "advanced";
+  }
+  return "beginner";
+};
+
+const toTrainingGoal = (value) => {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  const aliases = {
+    lose_weight: "weight_loss",
+    weightloss: "weight_loss",
+    gain_muscle: "strength",
+    muscle_gain: "strength",
+    build_muscle: "strength",
+    maintain: "strength",
+  };
+
+  const mapped = aliases[normalized] || normalized;
+  const allowed = [
+    "weight_loss",
+    "strength",
+    "endurance",
+    "flexibility",
+    "recovery",
+    "event",
+  ];
+  return allowed.includes(mapped) ? mapped : "strength";
+};
+
 class UserService {
   // Register new user
   async register(userData) {
@@ -65,6 +115,7 @@ class UserService {
       target_weight,
       experience_level,
       focus_goal,
+      splitType,
       workout_days,
       preferred_training_time,
       session_duration,
@@ -111,6 +162,8 @@ class UserService {
     });
     // Create profile if profile data is provided
     let profileData = null;
+    let nutritionPlanGenerated = false;
+    let trainingPlanGenerated = false;
     if (height && weight && age_years && sex && activity_level_lifestyle) {
       profileData = new Profile({
         userId: savedUser._id,
@@ -125,6 +178,7 @@ class UserService {
         target_weight,
         experience_level: experience_level || "",
         focus_goal: focus_goal || "",
+        splitType,
         workout_days: Array.isArray(workout_days) ? workout_days : [],
         preferred_training_time: preferred_training_time || "",
         session_duration,
@@ -147,6 +201,68 @@ class UserService {
         goal_weight: target_weight || null,
       });
       await bodyAnalysis.save();
+
+      const nutritionProfile = {
+        height,
+        weight,
+        current_weight: weight,
+        goal_weight: target_weight || weight,
+        age_years,
+        sex,
+        current_bmi: bmi,
+        bmi_category,
+        current_muscle_mass: muscle_mass,
+        activity_level_lifestyle,
+        experience_level: experience_level || "beginner",
+        focus_goal: focus_goal || "maintain",
+        medical_condition: normalizeStringArray(medical_condition),
+        allergies: normalizeStringArray(allergies),
+        injury_notes: injury_notes || "none",
+        country: country || "",
+        plan_weeks: toNumber(userData.plan_weeks, 4),
+      };
+
+      try {
+        const generatedNutrition =
+          await generateNutritionPlanFromGemini(nutritionProfile);
+        await saveNutritionPlan(savedUser._id, generatedNutrition);
+        nutritionPlanGenerated = true;
+      } catch (nutritionError) {
+        console.warn(
+          `Nutrition plan auto-generation skipped for user ${savedUser._id}: ${nutritionError.message}`,
+        );
+      }
+
+      const durationWeeks = Math.max(
+        1,
+        Math.min(12, toNumber(userData.plan_weeks, 12)),
+      );
+      const daysPerWeek = Array.isArray(workout_days)
+        ? Math.max(1, Math.min(7, workout_days.length || 3))
+        : 3;
+
+      const trainingPayload = {
+        userId: savedUser._id,
+        goal: toTrainingGoal(focus_goal),
+        level: toTrainingLevel(experience_level || activity_level_lifestyle),
+        durationWeeks,
+        weightKg: toNumber(weight, 0),
+        heightCm: toNumber(height, 0),
+        age: toNumber(age_years, 0),
+        gender: String(sex || "").toLowerCase(),
+        targetWeight: toNumber(target_weight || weight, 0),
+        splitType,
+        daysPerWeek,
+      };
+
+      try {
+        await trainingPlanService.generatePlan(trainingPayload);
+        trainingPlanGenerated = true;
+      } catch (trainingError) {
+        console.warn(
+          `Training plan auto-generation skipped for user ${savedUser._id}: ${trainingError.message}`,
+        );
+      }
     }
     const now = new Date();
     const week_number = getWeekNumber(now);
@@ -177,6 +293,8 @@ class UserService {
       id: savedUser._id,
       fullname: savedUser.fullname,
       email: savedUser.email,
+      nutritionPlanGenerated,
+      trainingPlanGenerated,
       message:
         "User registered successfully. Check your email for verification code.",
     };
@@ -251,6 +369,7 @@ class UserService {
         target_weight: user.profile.target_weight,
         experience_level: user.profile.experience_level,
         focus_goal: user.profile.focus_goal,
+        splitType: user.profile.splitType,
         workout_days: user.profile.workout_days,
         preferred_training_time: user.profile.preferred_training_time,
         session_duration: user.profile.session_duration,
@@ -731,6 +850,7 @@ class UserService {
       "target_weight",
       "experience_level",
       "focus_goal",
+      "splitType",
       "workout_days",
       "preferred_training_time",
       "session_duration",
@@ -849,6 +969,7 @@ class UserService {
         target_weight: user.profile.target_weight,
         experience_level: user.profile.experience_level,
         focus_goal: user.profile.focus_goal,
+        splitType: user.profile.splitType,
         workout_days: user.profile.workout_days,
         preferred_training_time: user.profile.preferred_training_time,
         session_duration: user.profile.session_duration,
@@ -960,69 +1081,133 @@ class UserService {
       throw err;
     }
 
-    const bodyAnalysis = await BodyAnalysis.findOne({ userId });
-    const weeklyCheckIns = await WeeklyCheckIn.find({ userId })
-      .sort({ year: -1, week_number: -1 })
-      .limit(8);
-    const mirrorSessions = await MirrorSession.find({ user: userId })
-      .sort({ updatedAt: -1 })
-      .limit(20);
+    const [
+      bodyAnalysis,
+      weeklyCheckIns,
+      mirrorSessions,
+      trainingPlan,
+      nutritionPlan,
+    ] = await Promise.all([
+      BodyAnalysis.findOne({ userId }),
+      WeeklyCheckIn.find({ userId }).sort({ year: 1, week_number: 1 }).limit(8),
+      MirrorSession.find({ user: userId }).sort({ updatedAt: -1 }).limit(20),
+      TrainingPlan.findOne({ userId }).sort({ createdAt: -1 }),
+      NutritionPlan.findOne({ user: userId })
+        .sort({ createdAt: -1 })
+        .populate("mealPlan.meals"),
+    ]);
+
+    const profile = user.profile;
+    const currentWeight = bodyAnalysis?.current_weight ?? profile?.weight ?? 0;
+    const startingWeight =
+      weeklyCheckIns[0]?.weight ??
+      bodyAnalysis?.current_weight ??
+      currentWeight;
+    const totalChange =
+      Number.isFinite(Number(currentWeight)) &&
+      Number.isFinite(Number(startingWeight))
+        ? Number(currentWeight) - Number(startingWeight)
+        : 0;
 
     const summary = {
-      current_weight: bodyAnalysis?.current_weight ?? user.profile?.weight ?? 0,
-      current_bmi: bodyAnalysis?.current_bmi ?? 0,
-      total_calories_burned: bodyAnalysis?.total_calories_burned ?? 0,
-      workout_streak: bodyAnalysis?.workout_streak ?? 0,
+      currentWeight,
+      startingWeight,
+      targetWeight: bodyAnalysis?.goal_weight ?? profile?.target_weight ?? null,
+      bmi: bodyAnalysis?.current_bmi ?? null,
+      bmiCategory: bodyAnalysis?.bmi_category ?? "unknown",
+      bodyFatPercentage: null,
+      leanMass: bodyAnalysis?.current_muscle_mass ?? null,
+      totalChange,
     };
 
-    const weeklyData = weeklyCheckIns
-      .map((entry) => ({
-        week_number: entry.week_number,
-        month: entry.month,
+    const weeklyData = weeklyCheckIns.map((entry, index) => {
+      const previousWeight = weeklyCheckIns[index - 1]?.weight;
+      const weightChange =
+        previousWeight != null
+          ? Number(entry.weight) - Number(previousWeight)
+          : null;
+
+      return {
+        week: entry.week_number,
+        date: entry.date,
         weight: entry.weight,
-        muscle_mass: entry.muscle_mass,
-        calories_burned: entry.calories_burned,
-        sessions_count: entry.sessions_count,
-      }))
-      .reverse();
+        weightChange: Number.isFinite(weightChange) ? weightChange : null,
+        notes: `Muscle mass: ${entry.muscle_mass ?? "—"} kg · Calories burned: ${entry.calories_burned ?? 0}`,
+      };
+    });
 
     const sessions = mirrorSessions
       .flatMap((session) => {
         if (session.exercises?.length) {
           return session.exercises.map((exercise) => ({
-            name: exercise.name,
-            reps_done: exercise.reps_done,
-            sets_done: exercise.sets_done,
-            calories_burned: exercise.calories_burned,
-            completedAt: exercise.completedAt || session.updatedAt,
+            exerciseName: exercise.name,
+            date: exercise.completedAt || session.updatedAt,
+            duration: exercise.duration_sec
+              ? Math.max(1, Math.round(exercise.duration_sec / 60))
+              : null,
+            caloriesBurned: exercise.calories_burned ?? 0,
+            notes: `${exercise.sets_done ?? 0} sets · ${exercise.reps_done ?? 0} reps`,
           }));
         }
 
         return [
           {
-            name: "Mirror Session",
-            reps_done: 0,
-            sets_done: 0,
-            calories_burned: session.total_calories || 0,
-            completedAt: session.updatedAt,
+            exerciseName: "Mirror Session",
+            date: session.updatedAt,
+            duration: null,
+            caloriesBurned: session.total_calories || 0,
+            notes: "Session summary",
           },
         ];
       })
       .slice(0, 20);
 
+    const [firstName, ...lastNameParts] = String(user.fullname || "")
+      .trim()
+      .split(/\s+/);
+    const lastName = lastNameParts.join(" ");
+
     const reportData = {
       user: {
         fullname: user.fullname,
+        firstName: firstName || user.fullname,
+        lastName: lastName || "",
         email: user.email,
       },
       profile: {
-        height: user.profile?.height,
-        age_years: user.profile?.age_years,
-        target_weight: user.profile?.target_weight ?? bodyAnalysis?.goal_weight,
+        height: profile?.height,
+        weight: profile?.weight,
+        age: profile?.age_years,
+        age_years: profile?.age_years,
+        goal: profile?.focus_goal,
+        target_weight: profile?.target_weight ?? bodyAnalysis?.goal_weight,
       },
       summary,
       weeklyData,
       sessions,
+      nutritionPlan: nutritionPlan
+        ? {
+            week: nutritionPlan.week,
+            dailyTargets: nutritionPlan.dailyTargets,
+            mealPlan: nutritionPlan.mealPlan,
+          }
+        : null,
+      trainingPlan: trainingPlan
+        ? {
+            goal: trainingPlan.goal,
+            level: trainingPlan.level,
+            daysPerWeek: trainingPlan.daysPerWeek,
+            splitType: trainingPlan.splitType,
+            durationWeeks: trainingPlan.durationWeeks,
+            targetWeight: trainingPlan.targetWeight,
+            bmiCategory: trainingPlan.bmiCategory,
+            calorieTarget: trainingPlan.calorieTarget,
+            summary: trainingPlan.summary,
+            weeklyPlan: trainingPlan.weeklyPlan,
+            progressionPlan: trainingPlan.progressionPlan,
+            safetyNotes: trainingPlan.safetyNotes,
+          }
+        : null,
     };
 
     const buffer = await generateFitnessPdf(reportData);

@@ -44,6 +44,13 @@ const profileSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    splitType: {
+      type: String,
+      enum: ["full_body", "upper_lower", "push_pull_legs"],
+      default: "full_body",
+      trim: true,
+      lowercase: true,
+    },
     workout_days: {
       type: [String],
       default: [],

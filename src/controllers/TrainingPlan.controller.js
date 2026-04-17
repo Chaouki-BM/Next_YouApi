@@ -15,6 +15,8 @@ const getTrainingPlan = asyncHandler(async (req, res) => {
 });
 
 const getTrainingPlanByUserId = asyncHandler(async (req, res) => {
+  console.log(req.params.userId);
+
   const result = await trainingPlanService.getLatestPlanByUserId(
     req.params.userId,
   );

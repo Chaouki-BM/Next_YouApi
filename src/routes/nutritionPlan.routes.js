@@ -8,7 +8,7 @@ const {
 
 const router = express.Router();
 
-router.post("/generate", verifyToken, generatePlan);
+router.post("/generate", generatePlan);
 router.get("/", verifyToken, getPlan);
 router.delete("/", verifyToken, deletePlan);
 

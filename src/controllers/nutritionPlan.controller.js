@@ -5,6 +5,9 @@ const {
   deleteNutritionPlan,
 } = require("../services/nutritionPlan.service");
 const { asyncHandler } = require("../utils/asyncHandler");
+const { calculateMetrics } = require("../utils/bodyMetrics");
+const User = require("../models/User.model");
+const BodyAnalysis = require("../models/BodyAnalysis.model");
 
 function toNumber(value, fallback = 0) {
   const parsed = Number(value);
@@ -74,7 +77,40 @@ function estimateWeeksToReachGoal(profile, generatedPlan) {
 
 const generatePlan = async (req, res, next) => {
   try {
-    const userProfile = req.body;
+    const userId = req.user?._id || req.userId || req.body.userId;
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userId is required when token is not provided",
+      });
+    }
+
+    const [user, bodyAnalysis] = await Promise.all([
+      User.findById(userId).populate("profile").lean(),
+      BodyAnalysis.findOne({ userId }).lean(),
+    ]);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const profile = user.profile || {};
+    const userProfile = {
+      ...profile,
+      ...req.body,
+      current_weight:
+        req.body.current_weight ??
+        bodyAnalysis?.current_weight ??
+        profile.weight,
+      goal_weight:
+        req.body.goal_weight ??
+        bodyAnalysis?.goal_weight ??
+        profile.target_weight,
+      injury_notes: req.body.injury_notes || profile.injury_notes || "none",
+    };
 
     const required = [
       "height",
@@ -83,23 +119,19 @@ const generatePlan = async (req, res, next) => {
       "goal_weight",
       "age_years",
       "sex",
-      "current_bmi",
-      "bmi_category",
-      "current_muscle_mass",
       "activity_level_lifestyle",
       "experience_level",
       "focus_goal",
       "medical_condition",
       "allergies",
-      "injury_notes",
       "country",
     ];
 
     const missing = required.filter(
       (field) =>
-        req.body[field] === undefined ||
-        req.body[field] === null ||
-        req.body[field] === "",
+        userProfile[field] === undefined ||
+        userProfile[field] === null ||
+        userProfile[field] === "",
     );
 
     if (missing.length > 0) {
@@ -107,6 +139,34 @@ const generatePlan = async (req, res, next) => {
         success: false,
         message: `Missing required fields: ${missing.join(", ")}`,
       });
+    }
+
+    const metrics = calculateMetrics({
+      weightKg: toNumber(userProfile.current_weight || userProfile.weight, 0),
+      heightCm: toNumber(userProfile.height, 0),
+      age: toNumber(userProfile.age_years, 0),
+      gender: String(userProfile.sex || "").toLowerCase(),
+      targetWeight: toNumber(userProfile.goal_weight, 0),
+      level: String(userProfile.experience_level || "beginner").toLowerCase(),
+    });
+
+    userProfile.current_bmi = metrics.bmi;
+    userProfile.bmi_category = metrics.bmi_category;
+    userProfile.current_muscle_mass = metrics.muscle_mass;
+    if (!bodyAnalysis?.current_bmi) {
+      userProfile.current_bmi = metrics.bmi;
+    } else {
+      userProfile.current_bmi = bodyAnalysis.current_bmi;
+    }
+    if (!bodyAnalysis?.bmi_category) {
+      userProfile.bmi_category = metrics.bmi_category;
+    } else {
+      userProfile.bmi_category = bodyAnalysis.bmi_category;
+    }
+    if (!bodyAnalysis?.current_muscle_mass) {
+      userProfile.current_muscle_mass = metrics.muscle_mass;
+    } else {
+      userProfile.current_muscle_mass = bodyAnalysis.current_muscle_mass;
     }
 
     userProfile.estimated_tdee = Math.round(
@@ -124,14 +184,6 @@ const generatePlan = async (req, res, next) => {
     );
 
     const geminiResult = await generateNutritionPlanFromGemini(userProfile);
-    const userId = req.user?._id || req.userId;
-
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized: user id not found in request",
-      });
-    }
 
     const plan = await saveNutritionPlan(userId, geminiResult);
     const weeksToReachGoal = estimateWeeksToReachGoal(

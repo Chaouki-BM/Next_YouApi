@@ -583,6 +583,19 @@ function splitBlocksWithinLimit(mainWorkout, mobilityPool, usedWeekIds) {
   return blocks;
 }
 
+function addDays(baseDate, days) {
+  const nextDate = new Date(baseDate);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+}
+
+function toDayMonth(dateValue) {
+  return {
+    day: dateValue.getDate(),
+    month: dateValue.getMonth() + 1,
+  };
+}
+
 function mapResponseDay({ workoutDayDoc, progression, blocks, level }) {
   const toSimple = (items) =>
     items.map((item) => ({
@@ -607,6 +620,7 @@ function mapResponseDay({ workoutDayDoc, progression, blocks, level }) {
     workoutDayId: String(workoutDayDoc._id),
     dayNumber: workoutDayDoc.dayNumber,
     dayType: workoutDayDoc.dayType,
+    date: workoutDayDoc.date,
     progression,
     warmUp: toSimple(blocks.warmUp),
     mainWorkout: toSimple(blocks.mainWorkout),
@@ -659,13 +673,14 @@ class TrainingPlanService {
     const baseIntensity = getIntensityFromBMI(bmi_category);
     const addCardio = shouldAddCardio(goal, weightKg, targetWeight);
 
-    const userExists = await User.exists({ _id: userId });
-    assert(userExists, "User not found", 404);
+    const user = await User.findById(userId).populate("profile").lean();
+    assert(user, "User not found", 404);
 
     await replaceUserTrainingPlans(userId);
 
+    const preferredSplitType = payload.splitType || user.profile?.splitType;
     let splitType = resolveSplitType(
-      payload.splitType,
+      preferredSplitType,
       toInt(payload.daysPerWeek, 3),
     );
     let splitPattern = SPLIT_PATTERNS[splitType];
@@ -745,6 +760,7 @@ class TrainingPlanService {
     });
 
     const weeks = [];
+    const planStartDate = new Date(trainingPlan.startDate || Date.now());
 
     for (let week = 1; week <= durationWeeks; week += 1) {
       const progression = getProgression(week, baseIntensity, goal);
@@ -755,6 +771,9 @@ class TrainingPlanService {
       for (let dayIndex = 0; dayIndex < splitPattern.length; dayIndex += 1) {
         const dayNumber = dayIndex + 1;
         const dayType = splitPattern[dayIndex];
+        const date = toDayMonth(
+          addDays(planStartDate, (week - 1) * splitPattern.length + dayIndex),
+        );
 
         const workoutDayDoc = await WorkoutDay.create({
           planId: trainingPlan._id,
@@ -768,6 +787,7 @@ class TrainingPlanService {
             workoutDayId: String(workoutDayDoc._id),
             dayNumber,
             dayType,
+            date,
             progression,
             warmUp: [],
             mainWorkout: [],
@@ -879,7 +899,7 @@ class TrainingPlanService {
 
         weekDays.push(
           mapResponseDay({
-            workoutDayDoc,
+            workoutDayDoc: { ...workoutDayDoc.toObject(), date },
             progression,
             blocks,
             level,
@@ -941,6 +961,10 @@ class TrainingPlanService {
 
     const weeks = [];
     const weekMap = new Map();
+    const planStartDate = new Date(
+      trainingPlan.startDate || trainingPlan.createdAt || Date.now(),
+    );
+    let dayOffset = 0;
 
     for (const workoutDay of workoutDays) {
       const groupedBlocks = exercisesByWorkoutDay[String(workoutDay._id)] || {
@@ -948,11 +972,14 @@ class TrainingPlanService {
         mainWorkout: [],
         cooldown: [],
       };
+      const date = toDayMonth(addDays(planStartDate, dayOffset));
+      dayOffset += 1;
 
       const dayResponse = {
         workoutDayId: String(workoutDay._id),
         dayNumber: workoutDay.dayNumber,
         dayType: workoutDay.dayType,
+        date,
         warmUp: groupedBlocks.warmUp,
         mainWorkout: groupedBlocks.mainWorkout,
         cooldown: groupedBlocks.cooldown,
