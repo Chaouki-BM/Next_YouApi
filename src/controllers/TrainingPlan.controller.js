@@ -26,8 +26,24 @@ const getTrainingPlanByUserId = asyncHandler(async (req, res) => {
   });
 });
 
+const markWorkoutDayAsDone = asyncHandler(async (req, res) => {
+  const { workoutDayId } = req.params;
+  const { done } = req.body;
+
+  const result = await trainingPlanService.markWorkoutDayAsDone(
+    workoutDayId,
+    done !== false, // defaults to true if not provided
+  );
+
+  return res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
 module.exports = {
   generateTrainingPlan,
   getTrainingPlan,
   getTrainingPlanByUserId,
+  markWorkoutDayAsDone,
 };

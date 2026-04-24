@@ -23,6 +23,10 @@ const workoutDaySchema = new mongoose.Schema(
       enum: ["push", "pull", "legs", "full_body", "rest"],
       required: true,
     },
+    done: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true },
 );

@@ -620,6 +620,7 @@ function mapResponseDay({ workoutDayDoc, progression, blocks, level }) {
     workoutDayId: String(workoutDayDoc._id),
     dayNumber: workoutDayDoc.dayNumber,
     dayType: workoutDayDoc.dayType,
+    done: workoutDayDoc.done || false,
     date: workoutDayDoc.date,
     progression,
     warmUp: toSimple(blocks.warmUp),
@@ -979,6 +980,7 @@ class TrainingPlanService {
         workoutDayId: String(workoutDay._id),
         dayNumber: workoutDay.dayNumber,
         dayType: workoutDay.dayType,
+        done: workoutDay.done || false,
         date,
         warmUp: groupedBlocks.warmUp,
         mainWorkout: groupedBlocks.mainWorkout,
@@ -1025,6 +1027,32 @@ class TrainingPlanService {
     }
 
     return this.getPlanById(latestPlan._id);
+  }
+
+  async markWorkoutDayAsDone(workoutDayId, isDone = true) {
+    assert(workoutDayId, "workoutDayId is required");
+
+    const workoutDay = await WorkoutDay.findByIdAndUpdate(
+      workoutDayId,
+      { done: isDone },
+      { new: true },
+    );
+
+    if (!workoutDay) {
+      const error = new Error("Workout day not found");
+      error.status = 404;
+      throw error;
+    }
+
+    return {
+      message: `Workout day marked as ${isDone ? "done" : "not done"}`,
+      workoutDay: {
+        workoutDayId: String(workoutDay._id),
+        dayNumber: workoutDay.dayNumber,
+        dayType: workoutDay.dayType,
+        done: workoutDay.done,
+      },
+    };
   }
 }
 

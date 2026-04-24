@@ -41,6 +41,7 @@ app.use("/api/exercises", exerciseRoutes);
 app.use("/api/body-analysis", bodyAnalysisRoutes);
 app.use("/api/nutrition-plan", nutritionPlanRoutes);
 app.use("/api/training-plan", trainingPlanRoutes);
+app.use("/api/admin", require("./src/routes/Admin.routes"));
 
 // Socket.IO connection handling
 io.on("connection", (socket) => {
