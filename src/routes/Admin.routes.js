@@ -19,7 +19,7 @@ const adminAuth = require("../middlewares/adminAuth.middleware");
 const router = express.Router();
 
 router.post("/login", loginAdmin);
-router.use(adminAuth);
+//router.use(adminAuth);
 
 router.get("/stats", getDashboardStats);
 router.get("/charts/registrations", getRegistrationChart);
