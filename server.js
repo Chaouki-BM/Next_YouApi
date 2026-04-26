@@ -25,6 +25,15 @@ const compression = require("compression");
 app.use(helmet());
 app.use(compression());
 app.use(limiter);
+
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    timestamp: new Date(),
+    uptime: process.uptime(),
+  });
+});
+
 const connectDB = require("./src/config/db");
 connectDB();
 // Routes
