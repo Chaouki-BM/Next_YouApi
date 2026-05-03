@@ -1,4 +1,11 @@
 require("dotenv").config();
+const Sentry = require("@sentry/node");
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  environment: process.env.NODE_ENV || "production",
+  tracesSampleRate: 1.0,
+});
+
 const limiter = require("./src/middlewares/rateLimit.middleware");
 const cors = require("cors");
 const express = require("express");
@@ -16,8 +23,11 @@ const io = new Server(server, {
 });
 
 const PORT = process.env.PORT;
+
+app.use(Sentry.Handlers.requestHandler());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
+
 app.use(cors());
 const helmet = require("helmet");
 const compression = require("compression");
@@ -137,7 +147,7 @@ io.on("connection", (socket) => {
 
 // Make io accessible to routes
 app.set("io", io);
-
+app.use(Sentry.Handlers.errorHandler());
 // Error handler must be the last middleware
 app.use(require("./src/middlewares/error.middleware"));
 

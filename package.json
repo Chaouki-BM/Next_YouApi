@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@sentry/node": "^7.120.4",
     "axios": "^1.13.5",
     "bcrypt": "^6.0.0",
     "compression": "^1.8.1",
