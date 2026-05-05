@@ -7,6 +7,9 @@ const { calculateMetrics, getWeekNumber } = require("../utils/bodyMetrics");
 // Get or create the BodyAnalysis summary for a user.
 async function createOrGetBodyAnalysis(userId) {
   const user = await User.findById(userId).populate("profile");
+  if (!user) {
+    throw new Error("User not found");
+  }
   const profile = user.profile;
 
   let bodyAnalysis = await BodyAnalysis.findOne({ userId });
@@ -35,7 +38,9 @@ async function createOrGetBodyAnalysis(userId) {
 // Save weekly weight entry and update body analysis summary.
 async function submitWeeklyCheckIn(userId, { weight }) {
   const user = await User.findById(userId).populate("profile");
-  console.log("user", user);
+  if (!user) {
+    throw new Error("User not found");
+  }
   const profile = user.profile;
 
   const { bmi, muscle_mass, bmi_category } = calculateMetrics({
