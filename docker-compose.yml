@@ -1,5 +1,4 @@
 services:
-  # ---- Your Node.js API ----
   app:
     build: .
     container_name: nextyou-api

@@ -153,151 +153,183 @@ class UserService {
     });
 
     const savedUser = await newUser.save();
+
     //calculate BMI and muscle mass for initial profile if profile data is provided
-    const { bmi, muscle_mass, bmi_category } = calculateMetrics({
-      weightKg: weight,
-      heightCm: height,
-      age: age_years,
-      gender: sex,
-    });
-    // Create profile if profile data is provided
-    let profileData = null;
-    let nutritionPlanGenerated = false;
-    let trainingPlanGenerated = false;
-    if (height && weight && age_years && sex && activity_level_lifestyle) {
-      profileData = new Profile({
-        userId: savedUser._id,
-        height,
-        weight,
-        age_years,
-        sex,
-        activity_level_lifestyle,
-        medical_condition: normalizeStringArray(medical_condition),
-        allergies: Array.isArray(allergies) ? allergies : [],
-        country: country || "",
-        target_weight,
-        experience_level: experience_level || "",
-        focus_goal: focus_goal || "",
-        splitType,
-        workout_days: Array.isArray(workout_days) ? workout_days : [],
-        preferred_training_time: preferred_training_time || "",
-        session_duration,
-        injury_notes: injury_notes || "",
+    try {
+      // calculate BMI and muscle mass for initial profile if profile data is provided
+      const { bmi, muscle_mass, bmi_category } = calculateMetrics({
+        weightKg: weight,
+        heightCm: height,
+        age: age_years,
+        gender: sex,
       });
 
-      const savedProfile = await profileData.save();
-      savedUser.profile = savedProfile._id;
-      await savedUser.save();
+      // Create profile if profile data is provided
+      let profileData = null;
+      let nutritionPlanGenerated = false;
+      let trainingPlanGenerated = false;
 
-      const is_weight_lost = weight > target_weight;
+      if (height && weight && age_years && sex && activity_level_lifestyle) {
+        profileData = new Profile({
+          userId: savedUser._id,
+          height,
+          weight,
+          age_years,
+          sex,
+          activity_level_lifestyle,
+          medical_condition: normalizeStringArray(medical_condition),
+          allergies: Array.isArray(allergies) ? allergies : [],
+          country: country || "",
+          target_weight,
+          experience_level: experience_level || "",
+          focus_goal: focus_goal || "",
+          splitType,
+          workout_days: Array.isArray(workout_days) ? workout_days : [],
+          preferred_training_time: preferred_training_time || "",
+          session_duration,
+          injury_notes: injury_notes || "",
+        });
 
-      const bodyAnalysis = new BodyAnalysis({
-        userId: savedUser._id,
-        current_weight: weight,
-        is_weight_lost: is_weight_lost || false,
-        current_bmi: bmi,
-        bmi_category,
-        current_muscle_mass: muscle_mass,
-        goal_weight: target_weight || null,
-      });
-      await bodyAnalysis.save();
+        const savedProfile = await profileData.save();
+        savedUser.profile = savedProfile._id;
+        await savedUser.save();
 
-      const nutritionProfile = {
-        height,
-        weight,
-        current_weight: weight,
-        goal_weight: target_weight || weight,
-        age_years,
-        sex,
-        current_bmi: bmi,
-        bmi_category,
-        current_muscle_mass: muscle_mass,
-        activity_level_lifestyle,
-        experience_level: experience_level || "beginner",
-        focus_goal: focus_goal || "maintain",
-        medical_condition: normalizeStringArray(medical_condition),
-        allergies: normalizeStringArray(allergies),
-        injury_notes: injury_notes || "none",
-        country: country || "",
-        plan_weeks: toNumber(userData.plan_weeks, 4),
-      };
+        const is_weight_lost = weight > target_weight;
+
+        try {
+          const bodyAnalysis = new BodyAnalysis({
+            userId: savedUser._id,
+            current_weight: weight,
+            is_weight_lost: is_weight_lost || false,
+            current_bmi: bmi,
+            bmi_category,
+            current_muscle_mass: muscle_mass,
+            goal_weight: target_weight || null,
+          });
+          await bodyAnalysis.save();
+        } catch (bodyAnalysisError) {
+          console.warn(
+            `Body analysis skipped for user ${savedUser._id}: ${bodyAnalysisError.message}`,
+          );
+        }
+
+        const nutritionProfile = {
+          height,
+          weight,
+          current_weight: weight,
+          goal_weight: target_weight || weight,
+          age_years,
+          sex,
+          current_bmi: bmi,
+          bmi_category,
+          current_muscle_mass: muscle_mass,
+          activity_level_lifestyle,
+          experience_level: experience_level || "beginner",
+          focus_goal: focus_goal || "maintain",
+          medical_condition: normalizeStringArray(medical_condition),
+          allergies: normalizeStringArray(allergies),
+          injury_notes: injury_notes || "none",
+          country: country || "",
+          plan_weeks: toNumber(userData.plan_weeks, 4),
+        };
+
+        try {
+          const generatedNutrition =
+            await generateNutritionPlanFromGemini(nutritionProfile);
+          await saveNutritionPlan(savedUser._id, generatedNutrition);
+          nutritionPlanGenerated = true;
+        } catch (nutritionError) {
+          console.warn(
+            `Nutrition plan auto-generation skipped for user ${savedUser._id}: ${nutritionError.message}`,
+          );
+        }
+
+        const durationWeeks = Math.max(
+          1,
+          Math.min(12, toNumber(userData.plan_weeks, 12)),
+        );
+        const daysPerWeek = Array.isArray(workout_days)
+          ? Math.max(1, Math.min(7, workout_days.length || 3))
+          : 3;
+
+        const trainingPayload = {
+          userId: savedUser._id,
+          goal: toTrainingGoal(focus_goal),
+          level: toTrainingLevel(experience_level || activity_level_lifestyle),
+          durationWeeks,
+          weightKg: toNumber(weight, 0),
+          heightCm: toNumber(height, 0),
+          age: toNumber(age_years, 0),
+          gender: String(sex || "").toLowerCase(),
+          targetWeight: toNumber(target_weight || weight, 0),
+          splitType,
+          daysPerWeek,
+        };
+
+        try {
+          await trainingPlanService.generatePlan(trainingPayload);
+          trainingPlanGenerated = true;
+        } catch (trainingError) {
+          console.warn(
+            `Training plan auto-generation skipped for user ${savedUser._id}: ${trainingError.message}`,
+          );
+        }
+      }
+
+      const now = new Date();
+      const week_number = getWeekNumber(now);
+      const month = now.getMonth() + 1;
+      const year = now.getFullYear();
 
       try {
-        const generatedNutrition =
-          await generateNutritionPlanFromGemini(nutritionProfile);
-        await saveNutritionPlan(savedUser._id, generatedNutrition);
-        nutritionPlanGenerated = true;
-      } catch (nutritionError) {
+        const checkIn = new WeeklyCheckIn({
+          userId: savedUser._id,
+          week_number: week_number,
+          year: year,
+          weight: weight,
+          bmi: bmi,
+          muscle_mass: muscle_mass,
+          date: now,
+          month: month,
+          source: "manual",
+        });
+        await checkIn.save();
+      } catch (checkInError) {
         console.warn(
-          `Nutrition plan auto-generation skipped for user ${savedUser._id}: ${nutritionError.message}`,
+          `Weekly check-in skipped for user ${savedUser._id}: ${checkInError.message}`,
         );
       }
 
-      const durationWeeks = Math.max(
-        1,
-        Math.min(12, toNumber(userData.plan_weeks, 12)),
+      // Send verification email
+      try {
+        await this.sendVerificationEmail(
+          savedUser.email,
+          savedUser.fullname,
+          savedUser.verificationCode,
+        );
+      } catch (emailError) {
+        console.warn(
+          `Verification email failed for user ${savedUser._id}: ${emailError.message}`,
+        );
+      }
+
+      return {
+        id: savedUser._id,
+        fullname: savedUser.fullname,
+        email: savedUser.email,
+        nutritionPlanGenerated,
+        trainingPlanGenerated,
+        message:
+          "User registered successfully. Check your email for verification code.",
+      };
+    } catch (err) {
+      // Rollback: delete user so they can register again
+      await User.findByIdAndDelete(savedUser._id);
+      console.error(
+        `Registration rolled back for user ${savedUser._id}: ${err.message}`,
       );
-      const daysPerWeek = Array.isArray(workout_days)
-        ? Math.max(1, Math.min(7, workout_days.length || 3))
-        : 3;
-
-      const trainingPayload = {
-        userId: savedUser._id,
-        goal: toTrainingGoal(focus_goal),
-        level: toTrainingLevel(experience_level || activity_level_lifestyle),
-        durationWeeks,
-        weightKg: toNumber(weight, 0),
-        heightCm: toNumber(height, 0),
-        age: toNumber(age_years, 0),
-        gender: String(sex || "").toLowerCase(),
-        targetWeight: toNumber(target_weight || weight, 0),
-        splitType,
-        daysPerWeek,
-      };
-
-      try {
-        await trainingPlanService.generatePlan(trainingPayload);
-        trainingPlanGenerated = true;
-      } catch (trainingError) {
-        console.warn(
-          `Training plan auto-generation skipped for user ${savedUser._id}: ${trainingError.message}`,
-        );
-      }
+      throw err;
     }
-    const now = new Date();
-    const week_number = getWeekNumber(now);
-    const month = now.getMonth() + 1;
-    const year = now.getFullYear();
-
-    const checkIn = new WeeklyCheckIn({
-      userId: savedUser._id,
-      week_number: week_number,
-      year: year,
-      weight: weight,
-      bmi: bmi,
-      muscle_mass: muscle_mass,
-      date: now,
-      month: month,
-      source: "manual",
-    });
-    await checkIn.save();
-
-    // Send verification email
-    await this.sendVerificationEmail(
-      savedUser.email,
-      savedUser.fullname,
-      savedUser.verificationCode,
-    );
-
-    return {
-      id: savedUser._id,
-      fullname: savedUser.fullname,
-      email: savedUser.email,
-      nutritionPlanGenerated,
-      trainingPlanGenerated,
-      message:
-        "User registered successfully. Check your email for verification code.",
-    };
   }
 
   // Login user
