@@ -239,7 +239,7 @@ No generic names. Skip allergy foods. Respect conditions. Day total=target±50kc
       lastError = err;
       const msg = String(err?.message || "");
 
-      // Invalid API key � stop immediately
+      // Invalid API key stop immediately
       if (
         msg.includes("401") ||
         msg.includes("invalid_api_key") ||
@@ -252,24 +252,24 @@ No generic names. Skip allergy foods. Respect conditions. Day total=target±50kc
         throw error;
       }
 
-      // Model not found � try next
+      // Model not found  try next
       if (msg.includes("404") || msg.includes("model_not_found")) {
         continue;
       }
 
-      // Rate limit or overload � wait then try next
+      // Rate limit or overload  wait then try next
       if (
         msg.includes("429") ||
         msg.includes("503") ||
         msg.includes("rate_limit") ||
         msg.includes("overloaded")
       ) {
-        console.warn(`Model ${modelName} unavailable, waiting 2s...`);
-        await wait(2000);
+        console.warn(`Model ${modelName} unavailable, waiting 4s...`);
+        await wait(4000);
         continue;
       }
 
-      // Unknown error � stop
+      // Unknown error stop
       const error = new Error(`Groq request failed: ${msg}`);
       error.status = 502;
       throw error;
